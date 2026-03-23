@@ -1,110 +1,275 @@
-function Services() {
-  return (
-    <div className="min-h-screen bg-slate-50 py-16 px-6 font-sans">
-      <div className="max-w-6xl mx-auto flex flex-col lg:flex-row gap-16 items-start">
-        
-        {/* Left Side: Humanized Info & Trust */}
-        <div className="lg:w-5/12 sticky top-24">
-          <span className="text-blue-600 font-bold tracking-wider uppercase text-sm mb-2 block">Expert Care</span>
-          <h1 className="text-4xl md:text-5xl font-extrabold text-slate-800 mb-6 leading-tight">Let's get you back on the road.</h1>
-          <p className="text-lg text-slate-600 mb-8 leading-relaxed">
-            Your vehicle is in good hands. Tell us what's going on, pick a time that works for you, and our certified mechanics will take care of the rest.
-          </p>
-          
-          <img 
-            src="https://images.unsplash.com/photo-1619642751034-765dfdf7c58e?w=800&q=80" 
-            alt="Friendly mechanic smiling" 
-            className="rounded-3xl shadow-md w-full object-cover h-64 mb-8 border-4 border-white"
-          />
+import { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { doc, getDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase';
 
-          {/* Trust Testimonial / Guarantee */}
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative">
-            <div className="absolute -top-4 -left-4 text-4xl">💬</div>
-            <p className="italic text-slate-600 mb-4 pl-4 text-sm leading-relaxed">
-              "We treat every car that rolls into our garage like it belongs to our own family. Honest pricing, transparent updates, and quality work."
-            </p>
-            <div className="flex items-center gap-3 pl-4">
-              <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center text-xl">👨‍🔧</div>
-              <div>
-                <p className="font-bold text-slate-800 text-sm">Mike T.</p>
-                <p className="text-xs text-slate-500">Lead Mechanic at GearGrid</p>
+function Services() {
+  const { currentUser } = useAuth();
+  const navigate = useNavigate();
+  const [userData, setUserData] = useState({ name: '', profilePic: '' });
+
+  // MGA BAG-ONG STATE PARA SA PAG-PILI
+  const servicesList = [
+    { id: 'diag', name: 'Diagnostic Check', desc: 'Full system computer scan and physical inspection.', price: 50.00 },
+    { id: 'oil', name: 'Oil Change', desc: 'Includes premium synthetic oil and new filter.', price: 85.00 }
+  ];
+  
+  const timeSlots = ['09:00 AM', '10:30 AM', '01:00 PM', '02:00 PM', '03:30 PM'];
+
+  const [selectedService, setSelectedService] = useState(servicesList[0]);
+  const [selectedDay, setSelectedDay] = useState(5);
+  const [selectedTime, setSelectedTime] = useState('02:00 PM');
+  const [isBooking, setIsBooking] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [showToast, setShowToast] = useState(false);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    const fetchUserData = async () => {
+      if (currentUser) {
+        const docRef = doc(db, "users", currentUser.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setUserData(docSnap.data());
+        }
+      }
+    };
+    fetchUserData();
+  }, [currentUser]);
+
+  // KANI ANG FUNCTION MO-SAVE SA FIREBASE
+  const handleConfirmBooking = async () => {
+    if (!currentUser) return;
+    setIsBooking(true);
+
+    try {
+      const bookingData = {
+        customerId: currentUser.uid,
+        customerName: userData.name || "Unknown Customer",
+        customerEmail: currentUser.email,
+        service: selectedService.name,
+        price: selectedService.price,
+        date: `October ${selectedDay}, 2023`, // Static month for now based sa imong design
+        time: selectedTime,
+        status: 'Pending',
+        mechanic: 'Unassigned',
+        createdAt: serverTimestamp()
+      };
+
+      await addDoc(collection(db, "bookings"), bookingData);
+      
+      setToastMessage("Booking Confirmed Successfully! 🎉");
+      setShowToast(true);
+      
+      // I-redirect sa home after 2 seconds
+      setTimeout(() => {
+        setShowToast(false);
+        navigate('/');
+      }, 2000);
+
+    } catch (error) {
+      console.error("Error booking service:", error);
+      alert("Failed to book service. Please try again.");
+    } finally {
+      setIsBooking(false);
+    }
+  };
+
+  const calendarDays = [
+    { day: 27, currentMonth: false }, { day: 28, currentMonth: false }, { day: 29, currentMonth: false }, { day: 30, currentMonth: false },
+    { day: 1, currentMonth: true }, { day: 2, currentMonth: true }, { day: 3, currentMonth: true },
+    { day: 4, currentMonth: true }, { day: 5, currentMonth: true }, { day: 6, currentMonth: true }, { day: 7, currentMonth: true },
+    { day: 8, currentMonth: true }, { day: 9, currentMonth: true }, { day: 10, currentMonth: true },
+    { day: 11, currentMonth: true }, { day: 12, currentMonth: true }, { day: 13, currentMonth: true }, { day: 14, currentMonth: true },
+    { day: 15, currentMonth: true }, { day: 16, currentMonth: true }, { day: 17, currentMonth: true },
+    { day: 18, currentMonth: true }, { day: 19, currentMonth: true }, { day: 20, currentMonth: true }, { day: 21, currentMonth: true },
+    { day: 22, currentMonth: true }, { day: 23, currentMonth: true }, { day: 24, currentMonth: true }, { day: 25, currentMonth: true },
+    { day: 26, currentMonth: true }, { day: 27, currentMonth: true }, { day: 28, currentMonth: true }, { day: 29, currentMonth: true },
+    { day: 30, currentMonth: true }, { day: 31, currentMonth: true }
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#0f1522] font-sans pb-20 pt-8 relative">
+      <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8">
+        
+        <div className="mb-8">
+          <Link to="/" className="text-blue-500 hover:text-blue-400 text-sm font-bold flex items-center gap-2 mb-4 transition-colors w-max">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+            Back to Home
+          </Link>
+          <h1 className="text-3xl md:text-4xl font-black text-white mb-2">Book a Garage Service</h1>
+          <p className="text-slate-400 text-sm">Select your preferred date, time, and service type.</p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+          
+          <div className="lg:col-span-2 space-y-6">
+            
+            {/* Service Type Selection */}
+            <div className="bg-[#1a2235] border border-slate-800 rounded-3xl p-6 md:p-8">
+              <h2 className="text-xl font-bold text-white mb-5 flex items-center gap-2">
+                <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-black">1</span>
+                Select Service Type
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {servicesList.map((srv) => (
+                  <div 
+                    key={srv.id}
+                    onClick={() => setSelectedService(srv)}
+                    className={`rounded-2xl p-4 cursor-pointer transition-all relative overflow-hidden border-2 ${
+                      selectedService.id === srv.id ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700 hover:border-slate-500 bg-[#0f1522]'
+                    }`}
+                  >
+                    {selectedService.id === srv.id && (
+                      <div className="absolute top-0 right-0 bg-blue-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg z-10">SELECTED</div>
+                    )}
+                    <h3 className={`font-bold text-lg mb-1 ${selectedService.id === srv.id ? 'text-white' : 'text-slate-300'}`}>{srv.name}</h3>
+                    <p className={`text-xs mb-3 ${selectedService.id === srv.id ? 'text-slate-400' : 'text-slate-500'}`}>{srv.desc}</p>
+                    <span className={`font-black text-lg ${selectedService.id === srv.id ? 'text-blue-500' : 'text-slate-300'}`}>${srv.price.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Calendar & Time */}
+            <div className="bg-[#1a2235] border border-slate-800 rounded-3xl p-6 md:p-8">
+              <h2 className="text-xl font-bold text-white mb-5 flex items-center gap-2">
+                <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-black">2</span>
+                Date & Time
+              </h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div>
+                  <div className="flex justify-between items-center mb-4">
+                    <button className="text-slate-400 hover:text-white transition-colors p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
+                    <span className="text-white font-bold">October 2023</span>
+                    <button className="text-slate-400 hover:text-white transition-colors p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>
+                  </div>
+                  <div className="grid grid-cols-7 gap-1 text-center mb-2">
+                    {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
+                      <div key={day} className="text-xs font-bold text-slate-500 py-2">{day}</div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1 text-center">
+                    {calendarDays.map((date, index) => {
+                      const isSelected = date.currentMonth && date.day === selectedDay;
+                      return (
+                        <div 
+                          key={index} 
+                          onClick={() => date.currentMonth && setSelectedDay(date.day)}
+                          className={`py-2 text-sm rounded-lg transition-colors ${
+                            !date.currentMonth ? 'text-slate-600 cursor-default' :
+                            isSelected ? 'bg-blue-600 text-white font-bold shadow-md shadow-blue-500/30 cursor-pointer' : 
+                            'text-slate-300 hover:bg-slate-700 cursor-pointer'
+                          }`}
+                        >
+                          {date.day}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-bold text-slate-400 mb-4 uppercase tracking-wider">Available Slots</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    {timeSlots.map((time, index) => (
+                      <div 
+                        key={index} 
+                        onClick={() => setSelectedTime(time)}
+                        className={`py-2.5 px-3 rounded-xl text-sm font-medium text-center cursor-pointer transition-all border ${
+                          selectedTime === time ? 'bg-blue-500/20 border-blue-500 text-blue-400' : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white bg-[#0f1522]'
+                        }`}
+                      >
+                        {time}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
+
+          <div className="lg:col-span-1">
+            <div className="bg-[#1a2235] border border-slate-800 rounded-3xl p-6 md:p-8 sticky top-6">
+              <h3 className="text-xl font-bold text-white mb-6">Booking Summary</h3>
+              
+              {currentUser ? (
+                <div className="mb-6 pb-6 border-b border-slate-800">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Customer Details</h4>
+                  <div className="flex items-center gap-3 bg-[#0f1522] p-3 rounded-xl border border-slate-800">
+                    {userData.profilePic ? (
+                      <img src={userData.profilePic} alt="Profile" className="w-12 h-12 rounded-full object-cover border border-slate-700" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-xl border border-slate-700 shadow-inner">👤</div>
+                    )}
+                    <div className="overflow-hidden">
+                      <p className="text-white font-bold text-sm truncate">{userData.name || "Loading name..."}</p>
+                      <p className="text-xs text-slate-400 truncate">{currentUser.email}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-6 pb-6 border-b border-slate-800">
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4">
+                    <p className="text-sm text-yellow-500 font-medium">Please <Link to="/login" className="font-bold underline">log in</Link> to secure your booking.</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-4 text-sm text-slate-300 mb-6 pb-6 border-b border-slate-800">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Service</span>
+                  <span className="font-bold text-white text-right ml-4">{selectedService.name}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Date</span>
+                  <span className="font-medium">October {selectedDay}, 2023</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Time Slot</span>
+                  <span className="font-medium">{selectedTime}</span>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-end mb-6">
+                <span className="text-base font-bold text-white">Total Price</span>
+                <span className="text-3xl font-black text-blue-500">${selectedService.price.toFixed(2)}</span>
+              </div>
+
+              <button 
+                disabled={!currentUser || isBooking}
+                onClick={handleConfirmBooking}
+                className={`w-full font-bold py-3.5 rounded-xl flex justify-center items-center gap-2 transition-colors mb-4 ${
+                  currentUser && !isBooking
+                    ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20" 
+                    : "bg-slate-700 text-slate-400 cursor-not-allowed"
+                }`}
+              >
+                {isBooking ? "Confirming..." : currentUser ? "Confirm Booking" : "Log in to Book"}
+                {!isBooking && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l7-7m-7 7H3" /></svg>}
+              </button>
+
+              <p className="text-center text-[11px] text-slate-500">By booking, you agree to our Terms of Service.</p>
+            </div>
+          </div>
         </div>
-
-        {/* Right Side: Clean, Soft Booking Form */}
-        <div className="lg:w-7/12 w-full bg-white p-8 md:p-10 rounded-3xl shadow-xl border border-slate-100">
-          <h2 className="text-2xl font-bold text-slate-800 mb-2">Schedule Your Visit</h2>
-          <p className="text-slate-500 text-sm mb-8">Fill out the details below and we'll confirm your slot shortly.</p>
-          
-          <form className="space-y-6">
-            
-            {/* Group 1: Personal Info */}
-            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-5">
-              <h3 className="font-semibold text-slate-700 text-sm uppercase tracking-wide">1. Your Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">First & Last Name</label>
-                  <input type="text" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:outline-none transition-shadow" placeholder="Jane Doe" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Phone Number</label>
-                  <input type="tel" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:outline-none transition-shadow" placeholder="(555) 000-0000" />
-                </div>
-              </div>
-            </div>
-
-            {/* Group 2: Vehicle & Service */}
-            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-5">
-              <h3 className="font-semibold text-slate-700 text-sm uppercase tracking-wide">2. Vehicle Info</h3>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">What do you drive?</label>
-                <input type="text" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:outline-none transition-shadow" placeholder="Year, Make, and Model (e.g. 2021 Honda Civic)" />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">How can we help today?</label>
-                <select className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:outline-none transition-shadow text-slate-700">
-                  <option>Select a primary service...</option>
-                  <option>Standard Oil Change</option>
-                  <option>Brake Inspection / Replacement</option>
-                  <option>Check Engine Light Diagnostic</option>
-                  <option>Tire Rotation & Alignment</option>
-                  <option>Something else / I'm not sure</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Group 3: Time & Notes */}
-            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-5">
-              <h3 className="font-semibold text-slate-700 text-sm uppercase tracking-wide">3. Time & Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Preferred Date</label>
-                  <input type="date" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:outline-none transition-shadow text-slate-600" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Preferred Time</label>
-                  <input type="time" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:outline-none transition-shadow text-slate-600" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Anything else we should know?</label>
-                <textarea rows="3" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:outline-none transition-shadow" placeholder="E.g. I hear a squeaking noise when I brake..."></textarea>
-              </div>
-            </div>
-
-            <button type="button" className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all transform hover:-translate-y-0.5 text-lg mt-4 flex justify-center items-center gap-2">
-              <span>Request Appointment</span>
-              <span>→</span>
-            </button>
-            <p className="text-center text-xs text-slate-400 mt-4">We will call or text you to confirm your exact appointment time.</p>
-          </form>
-        </div>
-
       </div>
+
+      {/* SUCCESS TOAST */}
+      <div className={`fixed bottom-6 right-6 z-50 transition-all duration-300 transform ${showToast ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'}`}>
+        <div className="bg-[#1a2235] border border-[#232d40] text-white px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-4">
+          <div className="bg-blue-500/20 text-blue-500 p-2 rounded-xl flex-shrink-0">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          </div>
+          <div>
+            <h4 className="font-bold text-sm text-white">Success</h4>
+            <p className="text-xs text-slate-400">{toastMessage}</p>
+          </div>
+        </div>
+      </div>
+
     </div>
   );
 }

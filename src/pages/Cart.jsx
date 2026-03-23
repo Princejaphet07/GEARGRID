@@ -1,183 +1,411 @@
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useCart } from '../context/CartContext'; 
+import { useAuth } from '../context/AuthContext'; // BAG-O: Gidugang para makuha ang user info
+import { collection, addDoc } from 'firebase/firestore'; // BAG-O: Para maka-save sa database
+import { db } from '../firebase'; // BAG-O: Database connection
 
 function Cart() {
-  // 🛒 Enhanced placeholder data
-  const cartItems = [
-    {
-      id: 1,
-      name: 'Premium Synthetic Motor Oil - 5W-30',
-      brand: 'Castrol Edge',
-      price: 35.00,
-      quantity: 2,
-      inStock: true,
-      image: 'https://images.unsplash.com/photo-1635773054098-9eb06b6e41b4?w=300&q=80'
-    },
-    {
-      id: 2,
-      name: 'High-Performance Ceramic Brake Pads',
-      brand: 'Brembo',
-      price: 55.50,
-      quantity: 1,
-      inStock: true,
-      image: 'https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?w=300&q=80'
-    }
-  ];
+  const { cartItems, removeFromCart } = useCart(); 
+  const { currentUser } = useAuth(); // BAG-O: Pagkuha sa current user
+  const navigate = useNavigate(); 
+  
+  // CHANGED: default payment is now 'cod' since gcash is removed
+  const [paymentMethod, setPaymentMethod] = useState('cod');
+  const [receiptImage, setReceiptImage] = useState(null);
+  
+  const [selectedItems, setSelectedItems] = useState([]);
+  const [promoCode, setPromoCode] = useState('');
+  const [discount, setDiscount] = useState(0);
+  const [localQuantities, setLocalQuantities] = useState({});
 
-  // Calculations
-  const subtotal = cartItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-  const shipping = subtotal > 100 ? 0 : 9.99; // Free shipping over $100
-  const tax = subtotal * 0.08; 
-  const total = subtotal + shipping + tax;
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('success'); 
+
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [onConfirmAction, setOnConfirmAction] = useState(() => () => {});
+
+  const [loading, setLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false); // BAG-O: Para mag-loading inig place order
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    setSelectedItems(cartItems.map((_, index) => index));
+    const initialQty = {};
+    cartItems.forEach((item, index) => {
+      initialQty[index] = item.quantity || 1;
+    });
+    setLocalQuantities(initialQty);
+  }, [cartItems]);
+
+  const subtotal = cartItems.reduce((acc, item, index) => {
+    if (selectedItems.includes(index)) {
+      return acc + (Number(item.price) * (localQuantities[index] || 1));
+    }
+    return acc;
+  }, 0);
+  
+  const estimatedTax = subtotal * 0.08; 
+  const total = subtotal + estimatedTax - discount;
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) setReceiptImage(URL.createObjectURL(file));
+  };
+
+  const canPlaceOrder = selectedItems.length > 0;
+
+  const triggerToast = (message, type = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    setShowToast(true);
+    setTimeout(() => {
+      setShowToast(false);
+    }, 3000);
+  };
+
+  const handleDelete = (index) => {
+    setConfirmMessage("Are you sure you want to remove this item?");
+    setOnConfirmAction(() => () => {
+      removeFromCart(index);
+      setSelectedItems(prev => prev.filter(i => i !== index));
+      setShowConfirm(false);
+    });
+    setShowConfirm(true);
+  };
+
+  const handleDeleteSelected = () => {
+    setConfirmMessage("Are you sure you want to remove the selected items?");
+    setOnConfirmAction(() => () => {
+      const sortedSelected = [...selectedItems].sort((a, b) => b - a);
+      sortedSelected.forEach(index => removeFromCart(index));
+      setSelectedItems([]);
+      setShowConfirm(false);
+    });
+    setShowConfirm(true);
+  };
+
+  const toggleSelectItem = (index) => {
+    setSelectedItems(prev => 
+      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedItems.length === cartItems.length) {
+      setSelectedItems([]);
+    } else {
+      setSelectedItems(cartItems.map((_, index) => index));
+    }
+  };
+
+  const updateQuantity = (index, delta) => {
+    setLocalQuantities(prev => {
+      const current = prev[index] || 1;
+      const newQty = Math.max(1, current + delta);
+      return { ...prev, [index]: newQty };
+    });
+  };
+
+  const applyPromo = () => {
+    if (promoCode.toUpperCase() === 'DISCOUNT20') {
+      setDiscount(20);
+      triggerToast("Promo code applied successfully!", "success");
+    } else {
+      setDiscount(0);
+      triggerToast("Invalid promo code. Try 'DISCOUNT20'", "error");
+    }
+  };
+
+  // BAG-O NGA CHECKOUT FUNCTION (MO-SEND DIRITSO SA ADMIN FIREBASE)
+  const handleProceedToCheckout = async () => {
+    if (!currentUser) {
+      triggerToast("Please log in first to place an order.", "error");
+      return;
+    }
+
+    const itemsToCheckout = selectedItems.map(index => ({
+      ...cartItems[index],
+      checkoutQuantity: localQuantities[index] || 1,
+      cartIndex: index 
+    }));
+
+    if (itemsToCheckout.length === 0) return;
+
+    setIsProcessing(true);
+
+    try {
+      await addDoc(collection(db, "orders"), {
+        userId: currentUser.uid,
+        customerEmail: currentUser.email,
+        items: itemsToCheckout,
+        subtotal: subtotal,
+        tax: estimatedTax,
+        discount: discount,
+        total: total,
+        paymentMethod: paymentMethod,
+        status: 'Pending',
+        createdAt: new Date().toISOString(),
+        orderDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      });
+
+      triggerToast("Order placed successfully! 🎉", "success");
+      
+      setTimeout(() => {
+        navigate('/profile'); // Mo-redirect paingon sa profile ig human order
+      }, 2000);
+
+    } catch (error) {
+      console.error("Error placing order:", error);
+      triggerToast("Failed to place order. Please try again.", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   return (
-    <div className="bg-slate-50 min-h-screen py-10 pb-24">
+    <div className="bg-[#0f1522] min-h-screen py-10 pb-24 text-gray-200 font-sans relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        {/* Header Section */}
-        <div className="flex items-baseline justify-between mb-8 pb-6 border-b border-slate-200">
-          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Shopping Cart</h1>
-          <p className="text-slate-500 font-medium">{cartItems.length} items</p>
+        <div className="mb-8">
+          <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
+            <Link to="/" className="hover:text-white transition-colors">Home</Link>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
+            <span className="text-gray-300">Shopping Cart</span>
+          </div>
+          <h1 className="text-3xl font-bold text-white">Shopping Cart</h1>
         </div>
 
-        {cartItems.length === 0 ? (
-          // Empty Cart UI
-          <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-16 flex flex-col items-center justify-center text-center">
-            <div className="w-24 h-24 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center text-4xl mb-6">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
-              </svg>
-            </div>
-            <h2 className="text-2xl font-bold text-slate-900 mb-2">Your cart is empty</h2>
-            <p className="text-slate-500 mb-8 max-w-md">Looks like you haven't added anything yet. Discover our top-tier parts and get your ride running smoothly.</p>
-            <Link to="/parts" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-xl transition-all shadow-md shadow-blue-200">
-              Continue Shopping
-            </Link>
-          </div>
-        ) : (
-          <div className="lg:grid lg:grid-cols-12 lg:gap-x-12 lg:items-start">
+        <div className="lg:grid lg:grid-cols-12 lg:gap-8 items-start">
+          
+          <section className="lg:col-span-8 space-y-6">
             
-            {/* Left Column: Cart Items list */}
-            <section className="lg:col-span-7 xl:col-span-8">
-              <ul className="bg-white rounded-3xl shadow-sm border border-slate-200 divide-y divide-slate-100 overflow-hidden">
-                {cartItems.map((item) => (
-                  <li key={item.id} className="p-6 sm:p-8 flex flex-col sm:flex-row gap-6 hover:bg-slate-50/50 transition-colors">
+            {cartItems.length > 0 && !loading && (
+              <div className="flex justify-between items-center pb-4 border-b border-gray-800">
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedItems.length === cartItems.length && cartItems.length > 0}
+                    onChange={toggleSelectAll}
+                    className="w-5 h-5 rounded border-gray-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900 bg-gray-800 cursor-pointer" 
+                  />
+                  <span className="font-medium text-white group-hover:text-blue-400 transition-colors">Select All ({cartItems.length} items)</span>
+                </label>
+                
+                {selectedItems.length > 0 && (
+                  <button onClick={handleDeleteSelected} className="text-sm font-medium text-gray-400 hover:text-red-500 flex items-center gap-2 transition-colors">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    Delete Selected
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {loading ? (
+                Array.from({ length: 2 }).map((_, i) => (
+                  <div key={i} className="flex gap-4 p-5 bg-[#1f2937] rounded-xl border border-gray-800 animate-pulse">
+                    <div className="pt-1">
+                      <div className="w-5 h-5 rounded bg-gray-700"></div>
+                    </div>
+                    <div className="w-24 h-24 bg-gray-700 rounded-lg flex-shrink-0"></div>
+                    <div className="flex-1 flex flex-col justify-between">
+                      <div>
+                        <div className="h-5 bg-gray-700 rounded w-3/4 mb-3"></div>
+                        <div className="h-4 bg-gray-700 rounded w-1/3 mb-4"></div>
+                        <div className="h-6 bg-gray-700 rounded w-1/4"></div>
+                      </div>
+                      <div className="mt-4">
+                        <div className="h-8 bg-gray-700 rounded w-24"></div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : cartItems.length === 0 ? (
+                <div className="bg-[#1f2937] border border-gray-800 rounded-2xl p-12 text-center">
+                  <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-2">Your cart is empty</h3>
+                  <p className="text-gray-400 mb-6">Looks like you haven't added anything to your cart yet.</p>
+                  <Link to="/parts" className="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 px-6 rounded-lg transition-colors inline-block">Start Shopping</Link>
+                </div>
+              ) : (
+                cartItems.map((item, index) => (
+                  <div key={index} className={`relative flex gap-4 p-5 bg-[#1f2937] rounded-xl border transition-colors ${selectedItems.includes(index) ? 'border-blue-500/50 bg-[#1f2937]/80' : 'border-gray-800'}`}>
                     
-                    {/* Product Image */}
-                    <div className="flex-shrink-0 w-full sm:w-32 h-32 bg-slate-100 rounded-2xl overflow-hidden border border-slate-100">
-                      <img src={item.image} alt={item.name} className="w-full h-full object-cover object-center" />
+                    <div className="pt-1">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedItems.includes(index)}
+                        onChange={() => toggleSelectItem(index)}
+                        className="w-5 h-5 rounded border-gray-600 text-blue-500 focus:ring-blue-500 bg-gray-800 cursor-pointer" 
+                      />
                     </div>
 
-                    {/* Product Details */}
-                    <div className="flex flex-1 flex-col justify-between">
-                      <div className="flex justify-between sm:space-x-6">
-                        <div>
-                          <h3 className="text-lg font-bold text-slate-900">
-                            <Link to={`/parts/${item.id}`} className="hover:text-blue-600 transition-colors">{item.name}</Link>
-                          </h3>
-                          <p className="text-sm text-slate-500 mt-1">Brand: {item.brand}</p>
-                          {item.inStock ? (
-                            <p className="text-sm font-medium text-emerald-600 flex items-center gap-1 mt-2">
-                              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" /></svg>
-                              In stock
-                            </p>
-                          ) : (
-                            <p className="text-sm font-medium text-orange-500 mt-2">Low Stock</p>
-                          )}
+                    <img src={item.image} className="w-24 h-24 object-cover rounded-lg bg-[#111827] border border-gray-700 p-1" alt={item.name} />
+                    
+                    <div className="flex-1 flex flex-col justify-between">
+                      <div className="pr-8">
+                        <h3 className="text-base font-bold text-white mb-1 line-clamp-2">{item.name}</h3>
+                        <p className="text-sm text-gray-400 mb-1">Category: {item.category}</p>
+                        <div className="flex items-end gap-2 mt-2">
+                          <span className="text-lg font-bold text-blue-400">₱{Number(item.price).toFixed(2)}</span>
                         </div>
-                        <p className="text-xl font-black text-slate-900">${item.price.toFixed(2)}</p>
                       </div>
 
-                      {/* Controls: Quantity & Actions */}
-                      <div className="flex items-center justify-between mt-6">
-                        <div className="flex items-center border border-slate-300 rounded-lg bg-white h-10">
-                          <button className="px-3 text-slate-500 hover:text-slate-800 hover:bg-slate-100 h-full rounded-l-lg transition-colors">−</button>
-                          <span className="px-4 font-semibold text-slate-800 border-x border-slate-200 h-full flex items-center">{item.quantity}</span>
-                          <button className="px-3 text-slate-500 hover:text-slate-800 hover:bg-slate-100 h-full rounded-r-lg transition-colors">+</button>
-                        </div>
-                        
-                        <div className="flex space-x-4">
-                          <button className="text-sm font-medium text-blue-600 hover:text-blue-500 transition-colors">Save for later</button>
-                          <span className="text-slate-300">|</span>
-                          <button className="text-sm font-medium text-red-500 hover:text-red-600 transition-colors">Remove</button>
+                      <div className="flex justify-between items-center mt-4">
+                        <div className="flex items-center border border-gray-700 rounded-lg overflow-hidden w-fit bg-[#111827]">
+                          <button onClick={() => updateQuantity(index, -1)} className="px-3 py-1 text-gray-400 hover:text-white hover:bg-gray-800 transition-colors">-</button>
+                          <span className="px-3 py-1 font-medium text-sm text-white border-x border-gray-700 min-w-[40px] text-center">{localQuantities[index]}</span>
+                          <button onClick={() => updateQuantity(index, 1)} className="px-3 py-1 text-gray-400 hover:text-white hover:bg-gray-800 transition-colors">+</button>
                         </div>
                       </div>
                     </div>
 
-                  </li>
-                ))}
-              </ul>
-            </section>
+                    <button 
+                      onClick={() => handleDelete(index)}
+                      className="absolute top-4 right-4 text-gray-500 hover:text-red-500 transition-colors"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
 
-            {/* Right Column: Order Summary */}
-            <section className="mt-8 lg:mt-0 lg:col-span-5 xl:col-span-4">
-              <div className="bg-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl sticky top-28">
-                <h2 className="text-xl font-bold mb-6">Order Summary</h2>
+            {/* Payment Details */}
+            {cartItems.length > 0 && !loading && (
+              <div className="bg-[#1f2937] border border-gray-800 rounded-xl p-6 mt-6">
+                <h2 className="text-lg font-bold text-white mb-4">Payment Details</h2>
+                
+                <div className="grid grid-cols-1 gap-4 mb-2">
+                  <label className="relative p-4 rounded-xl border-2 border-blue-500 bg-blue-500/10 cursor-pointer">
+                    <input type="radio" name="payment" value="cod" checked readOnly className="sr-only" />
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded bg-emerald-500/20 text-emerald-500 flex items-center justify-center font-bold text-xs">COD</div>
+                      <div>
+                        <span className="font-bold text-white">Cash on Delivery</span>
+                        <p className="text-xs text-gray-400 mt-0.5">Pay when your order arrives</p>
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
+          </section>
 
-                {/* Promo Code Input */}
-                <div className="mb-6 flex gap-2">
+          <section className="mt-8 lg:mt-0 lg:col-span-4 sticky top-6">
+            <div className="bg-[#1f2937] border border-gray-800 rounded-xl p-6 shadow-lg">
+              <h2 className="text-lg font-bold text-white mb-6">Order Summary</h2>
+              
+              <div className="mb-6">
+                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Promotions</label>
+                <div className="flex gap-2">
                   <input 
                     type="text" 
-                    placeholder="Promo Code" 
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value)}
+                    placeholder="Voucher Code" 
+                    className="w-full bg-[#111827] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                   />
-                  <button className="bg-slate-700 hover:bg-slate-600 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors">
-                    Apply
-                  </button>
+                  <button onClick={applyPromo} className="bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white px-4 py-2.5 rounded-lg text-sm font-bold transition-colors">Apply</button>
                 </div>
-
-                <dl className="space-y-4 text-sm text-slate-300 border-t border-slate-800 pt-6">
-                  <div className="flex justify-between items-center">
-                    <dt>Subtotal</dt>
-                    <dd className="font-medium text-white">${subtotal.toFixed(2)}</dd>
-                  </div>
-                  
-                  <div className="flex justify-between items-center">
-                    <dt className="flex items-center gap-1">
-                      Shipping
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-slate-500 cursor-help" title="Free shipping on orders over $100"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3 3 0 112.871 5.026v.345a.75.75 0 01-1.5 0v-.5c0-.72.57-1.172 1.081-1.287A1.5 1.5 0 108.94 6.94zM10 15a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" /></svg>
-                    </dt>
-                    <dd className="font-medium text-white">
-                      {shipping === 0 ? <span className="text-emerald-400 font-bold">Free</span> : `$${shipping.toFixed(2)}`}
-                    </dd>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <dt>Tax (8%)</dt>
-                    <dd className="font-medium text-white">${tax.toFixed(2)}</dd>
-                  </div>
-
-                  <div className="flex justify-between items-center border-t border-slate-800 pt-4 mt-4">
-                    <dt className="text-base font-bold text-white">Order Total</dt>
-                    <dd className="text-2xl font-black text-blue-400">${total.toFixed(2)}</dd>
-                  </div>
-                </dl>
-
-                <button className="w-full mt-8 bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl flex justify-center items-center gap-2 transition-all shadow-lg shadow-blue-500/30">
-                  Proceed to Checkout
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                  </svg>
-                </button>
-
-                {/* Trust Badges / Secure Checkout */}
-                <div className="mt-6 flex flex-col items-center">
-                  <p className="text-xs text-slate-400 mb-3 flex items-center gap-1">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-emerald-500"><path fillRule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clipRule="evenodd" /></svg>
-                    Secure Checkout
-                  </p>
-                  <div className="flex gap-2 opacity-60">
-                    <div className="bg-white rounded px-2 py-1 text-slate-800 text-[10px] font-black">VISA</div>
-                    <div className="bg-white rounded px-2 py-1 text-slate-800 text-[10px] font-black">MC</div>
-                    <div className="bg-white rounded px-2 py-1 text-slate-800 text-[10px] font-black italic">PayPal</div>
-                  </div>
-                </div>
-
               </div>
-            </section>
 
-          </div>
-        )}
+              <div className="space-y-4 mb-6 border-t border-gray-800 pt-6">
+                <div className="flex justify-between text-gray-400 text-sm">
+                  <span>Subtotal ({selectedItems.length} items)</span>
+                  <span className="text-white font-medium">₱{subtotal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-gray-400 text-sm">
+                  <span>Tax (8%)</span>
+                  <span className="text-white font-medium">₱{estimatedTax.toFixed(2)}</span>
+                </div>
+                {discount > 0 && (
+                  <div className="flex justify-between text-emerald-400 text-sm font-medium">
+                    <span>Discount</span>
+                    <span>-₱{discount.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-between items-center mb-6 pt-4 border-t border-gray-800">
+                <span className="text-base font-bold text-white">Total Payable</span>
+                <span className="text-2xl font-black text-blue-500">₱{Math.max(0, total).toFixed(2)}</span>
+              </div>
+
+              <button 
+                onClick={handleProceedToCheckout}
+                disabled={!canPlaceOrder || loading || isProcessing} 
+                className={`w-full py-3.5 rounded-xl font-bold flex justify-center items-center gap-2 transition-all shadow-md
+                  ${canPlaceOrder && !loading && !isProcessing ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
+              >
+                {isProcessing ? 'Processing Order...' : 'Place Order'}
+              </button>
+
+              <div className="mt-6 space-y-3">
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                  <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414L9 13.414l3.707-3.707z" clipRule="evenodd"></path></svg>
+                  100% Secure Payment
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
+
+      <div className={`fixed bottom-6 right-6 z-[60] transition-all duration-300 transform ${showToast ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'}`}>
+        <div className="bg-[#1a2235] border border-[#232d40] text-white px-5 py-4 rounded-2xl shadow-2xl shadow-black/50 flex items-center gap-4">
+          <div className={`p-2 rounded-xl flex-shrink-0 ${toastType === 'success' ? 'bg-blue-500/20 text-blue-500' : 'bg-red-500/20 text-red-500'}`}>
+            {toastType === 'success' ? (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            ) : (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            )}
+          </div>
+          <div>
+            <h4 className="font-bold text-sm text-white">{toastType === 'success' ? 'Success' : 'Error'}</h4>
+            <p className="text-xs text-gray-400">{toastMessage}</p>
+          </div>
+        </div>
+      </div>
+
+      {showConfirm && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-[#0f1522]/80 backdrop-blur-sm transition-opacity" onClick={() => setShowConfirm(false)}></div>
+          <div className="relative bg-[#1a2235] border border-[#232d40] rounded-2xl shadow-2xl shadow-black/80 max-w-sm w-full p-6 text-center animate-[scale-in_0.2s_ease-out]">
+            <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">Are you sure?</h3>
+            <p className="text-gray-400 text-sm mb-6">{confirmMessage}</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowConfirm(false)} className="flex-1 bg-[#0f1522] border border-[#232d40] hover:border-gray-500 text-gray-300 font-medium py-2.5 rounded-xl transition-colors">
+                Cancel
+              </button>
+              <button onClick={onConfirmAction} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2.5 rounded-xl transition-colors shadow-lg shadow-red-600/20">
+                Yes, Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes scale-in {
+          0% { transform: scale(0.95); opacity: 0; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+      `}} />
     </div>
   );
 }
