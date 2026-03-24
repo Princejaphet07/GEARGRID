@@ -9,7 +9,20 @@ function Products() {
   const [isSaving, setIsSaving] = useState(false);
   const [editId, setEditId] = useState(null); 
   
-  // ADDED: description to initial state
+  // Search, Filter, and Pagination States
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5; // MAXIMUM 5 ITEMS PER PAGE
+
+  // Toast States
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('success');
+
+  // Delete Confirmation State
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+
   const initialFormState = { name: '', category: 'Engine', price: '', stock: '', image: '', description: '' };
   const [formData, setFormData] = useState(initialFormState);
 
@@ -26,6 +39,18 @@ function Products() {
     return () => unsubscribe();
   }, []);
 
+  // Reset to Page 1 kung mag-search o mag-filter para dili masaag
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedCategory]);
+
+  const showNotification = (message, type = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -33,302 +58,366 @@ function Products() {
     setIsUploading(true);
     const uploadData = new FormData();
     uploadData.append("file", file);
-    uploadData.append("upload_preset", "geargrid");
+    uploadData.append("upload_preset", "upload"); 
+    uploadData.append("cloud_name", "drabx5lq2"); 
 
     try {
-      const response = await fetch(`https://api.cloudinary.com/v1_1/djhtu0rzz/image/upload`, {
+      const res = await fetch("https://api.cloudinary.com/v1_1/drabx5lq2/image/upload", {
         method: "POST",
         body: uploadData,
       });
-      const data = await response.json();
-      if (data.secure_url) {
-        setFormData({ ...formData, image: data.secure_url });
-      }
-    } catch (error) {
-      console.error("Error uploading image: ", error);
-      alert("Failed to upload image.");
+      const data = await res.json();
+      setFormData({ ...formData, image: data.secure_url });
+      showNotification("Image uploaded successfully!");
+    } catch (err) {
+      console.error(err);
+      showNotification("Failed to upload image.", "error");
     } finally {
       setIsUploading(false);
     }
   };
 
-  const handleSaveProduct = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.image) {
-      alert("Please upload a product image.");
-      return;
-    }
-
     setIsSaving(true);
-    const stockNum = Number(formData.stock);
-    const productData = {
-      name: formData.name,
-      category: formData.category,
-      price: Number(formData.price),
-      stock: stockNum,
-      description: formData.description, // ADDED: saving description
-      status: stockNum > 10 ? 'In Stock' : stockNum > 0 ? 'Low Stock' : 'Out of Stock',
-      image: formData.image,
-      updatedAt: new Date()
-    };
-
     try {
       if (editId) {
-        await updateDoc(doc(db, "products", editId), productData);
-        alert("Product successfully updated! ✅");
+        const productRef = doc(db, "products", editId);
+        await updateDoc(productRef, formData);
+        showNotification("Product updated successfully!");
       } else {
-        await addDoc(collection(db, "products"), {
-          ...productData,
-          createdAt: new Date()
-        });
-        alert("Product successfully added! ✅");
+        await addDoc(collection(db, "products"), formData);
+        showNotification("Product added successfully!");
       }
-      closeForm();
+      handleCloseForm();
     } catch (error) {
-      console.error("Error saving product: ", error);
-      alert("Error saving product.");
+      console.error("Error saving product:", error);
+      showNotification("Failed to save product.", "error");
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleEdit = (product) => {
-    setFormData({
-      name: product.name,
-      category: product.category,
-      price: product.price,
-      stock: product.stock,
-      image: product.image,
-      description: product.description || '' // ADDED: loading description
-    });
+    setFormData(product);
     setEditId(product.id);
     setShowForm(true);
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm("Are you sure you want to delete this product?")) {
+  const confirmDelete = async (id) => {
+    try {
       await deleteDoc(doc(db, "products", id));
+      showNotification("Product deleted successfully!");
+    } catch (error) {
+      console.error("Error deleting product:", error);
+      showNotification("Failed to delete product.", "error");
+    } finally {
+      setDeleteConfirmId(null);
     }
   };
 
-  const closeForm = () => {
+  const handleCloseForm = () => {
     setShowForm(false);
-    setEditId(null);
     setFormData(initialFormState);
+    setEditId(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const totalProducts = products.length;
-  const lowStockItems = products.filter(p => Number(p.stock) > 0 && Number(p.stock) <= 10).length;
-  const outOfStockItems = products.filter(p => Number(p.stock) === 0).length;
+  // Filtering Logic
+  const filteredProducts = products.filter(product => {
+    const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          (product.description && product.description.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesCategory = selectedCategory === 'All' || product.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
+
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredProducts.slice(indexOfFirstItem, indexOfLastItem);
+
+  const categories = ['All', 'Engine', 'Electrical', 'Accessories', 'Transmission', 'Suspension'];
 
   return (
-    <div className="p-4 sm:p-8 min-h-screen text-gray-200 font-sans">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Product Inventory</h1>
-          <p className="text-sm text-gray-400 mt-1">Monitor your stock, track performance, and manage catalog.</p>
-        </div>
-        {!showForm && (
-          <button onClick={() => setShowForm(true)} className="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
-            Add Product
-          </button>
-        )}
+    <div className="min-h-screen bg-[#0f1522] font-sans p-6 lg:p-10 text-slate-300 relative z-0 overflow-hidden">
+      
+      {/* BACKGROUND GLOW */}
+      <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
+        <div className="absolute top-[-10%] right-[10%] w-[40%] h-[40%] rounded-full bg-blue-600/20 blur-[120px]"></div>
+        <div className="absolute bottom-[10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-emerald-600/10 blur-[120px]"></div>
       </div>
 
-      {showForm ? (
-        <div className="max-w-4xl">
-          <button onClick={closeForm} className="text-sm text-gray-400 hover:text-white mb-6 flex items-center gap-2 transition-colors">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-            Back to Inventory
-          </button>
+      <div className="max-w-7xl mx-auto relative z-10">
+        
+        {/* Header Section */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-black text-white mb-2">Manage Products</h1>
+            <p className="text-slate-400 text-sm">Add, edit, or remove motor parts from your inventory.</p>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
+            {/* Category Filter */}
+            <select 
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="bg-white/5 backdrop-blur-md border border-white/10 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all shadow-lg"
+            >
+              {categories.map(cat => <option key={cat} value={cat} className="bg-[#1a2235] text-white">{cat}</option>)}
+            </select>
 
-          <form onSubmit={handleSaveProduct} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="md:col-span-2 space-y-6">
-                <div className="bg-[#1f2937] p-6 rounded-xl border border-gray-700">
-                  <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    General Information
-                  </h2>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Product Title</label>
-                    <input type="text" required value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} placeholder="e.g. High Performance Brake Pads" className="w-full bg-[#111827] text-white border border-gray-600 rounded-lg p-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" />
-                  </div>
-                  {/* ADDED: Description Textarea */}
-                  <div className="mt-4">
-                    <label className="block text-sm text-gray-400 mb-1">Product Description</label>
-                    <textarea rows="3" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} placeholder="Detailed description of the product..." className="w-full bg-[#111827] text-white border border-gray-600 rounded-lg p-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"></textarea>
-                  </div>
-                </div>
-
-                <div className="bg-[#1f2937] p-6 rounded-xl border border-gray-700">
-                  <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                    Media & Gallery
-                  </h2>
-                  <div onClick={() => fileInputRef.current.click()} className="w-full h-40 border-2 border-dashed border-gray-600 hover:border-blue-500 rounded-xl flex flex-col items-center justify-center cursor-pointer bg-[#111827] overflow-hidden transition-all group">
-                    {isUploading ? (
-                      <span className="text-blue-500 font-medium animate-pulse">Uploading Image...</span>
-                    ) : formData.image ? (
-                      <img src={formData.image} alt="Preview" className="w-full h-full object-contain p-2" />
-                    ) : (
-                      <div className="text-center">
-                        <svg className="w-10 h-10 text-gray-500 group-hover:text-blue-500 mx-auto mb-2 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-                        <span className="text-sm text-gray-400 group-hover:text-gray-300">Click to upload image</span>
-                      </div>
-                    )}
-                  </div>
-                  <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
-                </div>
+            {/* Search Bar */}
+            <div className="relative w-full sm:w-64">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
               </div>
-
-              <div className="space-y-6">
-                <div className="bg-[#1f2937] p-6 rounded-xl border border-gray-700">
-                  <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    Pricing & Inventory
-                  </h2>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-1">Price ($)</label>
-                      <input type="number" required step="0.01" value={formData.price} onChange={(e) => setFormData({...formData, price: e.target.value})} className="w-full bg-[#111827] text-white border border-gray-600 rounded-lg p-3 focus:outline-none focus:border-blue-500" />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-1">Stock Quantity</label>
-                      <input type="number" required value={formData.stock} onChange={(e) => setFormData({...formData, stock: e.target.value})} className="w-full bg-[#111827] text-white border border-gray-600 rounded-lg p-3 focus:outline-none focus:border-blue-500" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-[#1f2937] p-6 rounded-xl border border-gray-700">
-                  <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-                    Organization
-                  </h2>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Category</label>
-                    <select value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="w-full bg-[#111827] text-white border border-gray-600 rounded-lg p-3 focus:outline-none focus:border-blue-500 appearance-none">
-                      <option>Engine</option>
-                      <option>Brakes</option>
-                      <option>Fluids</option>
-                      <option>Tires</option>
-                      <option>Accessories</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
+              <input 
+                type="text" 
+                placeholder="Search products..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-white/5 backdrop-blur-md border border-white/10 text-white rounded-xl pl-11 pr-4 py-3 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all placeholder-slate-400 shadow-lg"
+              />
             </div>
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
-              <button type="button" onClick={closeForm} className="px-6 py-2.5 rounded-lg font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 transition-colors">Cancel</button>
-              <button type="submit" disabled={isSaving || isUploading} className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50">
-                {isSaving ? "Saving..." : editId ? "Update Product" : "Save Product"}
-              </button>
-            </div>
-          </form>
+            {/* Add New Button */}
+            <button 
+              onClick={() => setShowForm(true)} 
+              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-[0_0_15px_rgba(37,99,235,0.4)] flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              Add Product
+            </button>
+          </div>
         </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div className="bg-[#1f2937] p-6 rounded-xl border border-gray-700 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-400 mb-1">Total Products</p>
-                <h3 className="text-3xl font-bold text-white">{totalProducts}</h3>
-              </div>
-              <div className="p-3 bg-blue-500/10 rounded-lg text-blue-400">
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
-              </div>
+
+        {/* GLASS TABLE */}
+        <div className="bg-[#1a2235]/40 backdrop-blur-xl rounded-3xl border border-white/10 overflow-hidden shadow-[0_8px_32px_0_rgba(0,0,0,0.4)] flex flex-col">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-white/5 text-slate-300 text-xs uppercase tracking-wider border-b border-white/10">
+                  <th className="p-5 font-bold">Product Info</th>
+                  <th className="p-5 font-bold">Category</th>
+                  <th className="p-5 font-bold">Price</th>
+                  <th className="p-5 font-bold">Stock</th>
+                  <th className="p-5 font-bold text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {currentItems.length === 0 ? (
+                  <tr><td colSpan="5" className="p-10 text-center text-slate-400">No products found.</td></tr>
+                ) : (
+                  currentItems.map(product => (
+                    <tr key={product.id} className="hover:bg-white/5 transition-colors group">
+                      
+                      {/* Product Info */}
+                      <td className="p-5 flex items-center gap-5">
+                        {product.image ? (
+                           <img src={product.image} alt={product.name} className="w-20 h-20 md:w-24 md:h-24 object-cover rounded-xl border border-white/10 shadow-md" />
+                        ) : (
+                           <div className="w-20 h-20 md:w-24 md:h-24 bg-white/5 border border-white/10 rounded-xl flex items-center justify-center text-slate-500 text-3xl">📦</div>
+                        )}
+                        <div>
+                          <p className="font-bold text-white text-base md:text-lg line-clamp-1">{product.name}</p>
+                          <p className="text-xs text-slate-400 line-clamp-2 w-48 md:w-64 mt-1" title={product.description}>{product.description || "No description"}</p>
+                        </div>
+                      </td>
+
+                      {/* Category */}
+                      <td className="p-5">
+                        <span className="bg-white/10 border border-white/10 text-slate-300 px-3 py-1 rounded-full text-xs font-medium">
+                          {product.category}
+                        </span>
+                      </td>
+
+                      {/* Price */}
+                      <td className="p-5 font-bold text-emerald-400 text-lg">
+                        ₱{Number(product.price).toLocaleString()}
+                      </td>
+
+                      {/* Stock */}
+                      <td className="p-5">
+                         <span className={`px-3 py-1 rounded-lg text-xs font-bold border ${
+                            Number(product.stock) > 10 ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' : 
+                            Number(product.stock) > 0 ? 'bg-yellow-500/10 text-yellow-300 border-yellow-500/30' : 
+                            'bg-red-500/10 text-red-300 border-red-500/30'
+                          }`}>
+                            {product.stock} in stock
+                          </span>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="p-5 text-center">
+                        <div className="flex justify-center items-center gap-2">
+                          <button onClick={() => handleEdit(product)} className="w-10 h-10 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/30 hover:bg-blue-500 hover:text-white transition-all flex justify-center items-center backdrop-blur-sm" title="Edit">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                          </button>
+                          <button onClick={() => setDeleteConfirmId(product.id)} className="w-10 h-10 rounded-lg bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500 hover:text-white transition-all flex justify-center items-center backdrop-blur-sm" title="Delete">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                          </button>
+                        </div>
+                      </td>
+
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* PAGINATION UI */}
+          <div className="p-5 border-t border-white/10 bg-white/5 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div className="text-xs text-slate-400">
+              Showing <span className="font-bold text-white">{filteredProducts.length === 0 ? 0 : indexOfFirstItem + 1}</span> to <span className="font-bold text-white">{Math.min(indexOfLastItem, filteredProducts.length)}</span> of <span className="font-bold text-white">{filteredProducts.length}</span> products
             </div>
             
-            <div className="bg-[#1f2937] p-6 rounded-xl border border-gray-700 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-400 mb-1">Low Stock Items</p>
-                <h3 className="text-3xl font-bold text-orange-400">{lowStockItems}</h3>
-              </div>
-              <div className="p-3 bg-orange-500/10 rounded-lg text-orange-400">
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-              </div>
-            </div>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+                <button 
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                >
+                  Previous
+                </button>
+                
+                {/* Page Numbers */}
+                {[...Array(totalPages)].map((_, index) => (
+                  <button
+                    key={index + 1}
+                    onClick={() => setCurrentPage(index + 1)}
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-medium transition-all ${
+                      currentPage === index + 1 
+                        ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.4)] border border-blue-500' 
+                        : 'text-slate-400 hover:bg-white/10 hover:text-white border border-transparent'
+                    }`}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
 
-            <div className="bg-[#1f2937] p-6 rounded-xl border border-gray-700 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-400 mb-1">Out of Stock</p>
-                <h3 className="text-3xl font-bold text-red-500">{outOfStockItems}</h3>
+                <button 
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                >
+                  Next
+                </button>
               </div>
-              <div className="p-3 bg-red-500/10 rounded-lg text-red-500">
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-              </div>
-            </div>
+            )}
           </div>
 
-          <div className="bg-[#1f2937] border border-gray-700 rounded-xl overflow-hidden shadow-sm">
-            <div className="p-6 border-b border-gray-700 flex justify-between items-center bg-[#1f2937]">
-              <h2 className="text-lg font-semibold text-white">Stock Details</h2>
+        </div>
+      </div>
+
+      {/* ADD / EDIT GLASS MODAL */}
+      {showForm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#0f1522]/90 backdrop-blur-2xl border border-white/10 rounded-3xl w-full max-w-lg overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+            
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
+              <h2 className="text-xl font-bold text-white">{editId ? 'Edit Product' : 'Add New Product'}</h2>
+              <button onClick={handleCloseForm} className="text-slate-400 hover:text-white bg-white/5 hover:bg-red-500/80 p-2 rounded-xl transition-colors border border-white/10">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse whitespace-nowrap">
-                <thead>
-                  <tr className="bg-[#111827] text-gray-400 text-xs uppercase tracking-wider">
-                    <th className="p-4 font-semibold">Product Name</th>
-                    <th className="p-4 font-semibold">Category</th>
-                    <th className="p-4 font-semibold">Price</th>
-                    <th className="p-4 font-semibold">Stock</th>
-                    <th className="p-4 font-semibold">Status</th>
-                    <th className="p-4 font-semibold text-center">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-700">
-                  {products.length === 0 ? (
-                    <tr><td colSpan="6" className="text-center p-8 text-gray-500">No products available. Add one to get started.</td></tr>
-                  ) : (
-                    products.map((product) => (
-                      <tr key={product.id} className="hover:bg-gray-800/50 transition-colors">
-                        <td className="p-4">
-                          <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-lg bg-[#111827] border border-gray-600 flex-shrink-0 flex items-center justify-center p-1">
-                              <img src={product.image} className="max-w-full max-h-full object-contain rounded" alt={product.name} />
-                            </div>
-                            <span className="font-semibold text-white truncate max-w-[200px]">{product.name}</span>
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <span className="px-3 py-1 bg-gray-700 text-gray-300 text-xs rounded-full font-medium">{product.category}</span>
-                        </td>
-                        <td className="p-4 text-gray-300 font-medium">${Number(product.price).toFixed(2)}</td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-2">
-                            <div className="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                              <div className={`h-full ${product.stock > 10 ? 'bg-green-500' : product.stock > 0 ? 'bg-orange-500' : 'bg-red-500'}`} style={{ width: `${Math.min((product.stock / 100) * 100, 100)}%` }}></div>
-                            </div>
-                            <span className="text-gray-300 text-sm w-6">{product.stock}</span>
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <span className={`flex items-center gap-1.5 text-sm font-medium ${product.stock > 10 ? 'text-green-400' : product.stock > 0 ? 'text-orange-400' : 'text-red-400'}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${product.stock > 10 ? 'bg-green-400' : product.stock > 0 ? 'bg-orange-400' : 'bg-red-400'}`}></span>
-                            {product.stock > 10 ? 'In Stock' : product.stock > 0 ? 'Low Stock' : 'Out of Stock'}
-                          </span>
-                        </td>
-                        <td className="p-4 text-center">
-                          <div className="flex justify-center items-center gap-3">
-                            <button onClick={() => handleEdit(product)} className="text-gray-400 hover:text-blue-400 transition-colors" title="Edit">
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-                            </button>
-                            <button onClick={() => handleDelete(product.id)} className="text-gray-400 hover:text-red-500 transition-colors" title="Delete">
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              
+              {/* Image Upload Area */}
+              <div className="flex items-center gap-5 bg-white/5 p-4 rounded-2xl border border-white/10">
+                 {formData.image ? (
+                    <img src={formData.image} alt="Preview" className="w-24 h-24 rounded-xl object-cover border border-white/20 shadow-md" />
+                 ) : (
+                    <div className="w-24 h-24 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-slate-400 text-3xl">📷</div>
+                 )}
+                 <div className="flex-1">
+                    <label className="block text-xs font-bold text-slate-400 mb-2">Product Image</label>
+                    <input 
+                      type="file" 
+                      onChange={handleImageUpload} 
+                      ref={fileInputRef} 
+                      className="block w-full text-xs text-slate-400 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-500 transition-all cursor-pointer"
+                      accept="image/*"
+                    />
+                 </div>
+                 {isUploading && <div className="text-xs text-blue-400 animate-pulse font-bold">Uploading...</div>}
+              </div>
+
+              {/* Form Inputs */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Product Name</label>
+                  <input type="text" required value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} className="w-full bg-white/5 border border-white/10 text-white rounded-xl px-4 py-2.5 focus:outline-none focus:border-blue-500/50 transition-all" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Category</label>
+                  <select value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="w-full bg-[#1a2235] border border-white/10 text-white rounded-xl px-4 py-2.5 focus:outline-none focus:border-blue-500/50 transition-all appearance-none">
+                    <option value="Engine">Engine</option>
+                    <option value="Electrical">Electrical</option>
+                    <option value="Accessories">Accessories</option>
+                    <option value="Transmission">Transmission</option>
+                    <option value="Suspension">Suspension</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Price (₱)</label>
+                  <input type="number" required min="0" value={formData.price} onChange={(e) => setFormData({...formData, price: e.target.value})} className="w-full bg-white/5 border border-white/10 text-white rounded-xl px-4 py-2.5 focus:outline-none focus:border-blue-500/50 transition-all" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Stock Quantity</label>
+                  <input type="number" required min="0" value={formData.stock} onChange={(e) => setFormData({...formData, stock: e.target.value})} className="w-full bg-white/5 border border-white/10 text-white rounded-xl px-4 py-2.5 focus:outline-none focus:border-blue-500/50 transition-all" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">Description</label>
+                <textarea rows="3" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} className="w-full bg-white/5 border border-white/10 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500/50 transition-all resize-none" placeholder="Short product details..."></textarea>
+              </div>
+
+              <div className="pt-4 border-t border-white/10 flex justify-end gap-3">
+                <button type="button" onClick={handleCloseForm} className="px-5 py-2.5 rounded-xl font-bold text-slate-300 hover:text-white hover:bg-white/10 transition-all border border-transparent">Cancel</button>
+                <button type="submit" disabled={isUploading || isSaving} className={`px-5 py-2.5 rounded-xl font-bold text-white transition-all shadow-lg ${isUploading || isSaving ? 'bg-blue-600/50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.4)]'}`}>
+                  {isSaving ? 'Saving...' : editId ? 'Update Product' : 'Add Product'}
+                </button>
+              </div>
+            </form>
           </div>
-        </>
+        </div>
       )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#1a2235]/90 backdrop-blur-2xl border border-red-500/30 rounded-3xl w-full max-w-sm p-6 shadow-[0_0_50px_rgba(239,68,68,0.2)] text-center">
+            <div className="w-16 h-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/30">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">Are you sure?</h3>
+            <p className="text-sm text-slate-400 mb-6">This action cannot be undone. This product will be permanently deleted.</p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setDeleteConfirmId(null)} className="px-5 py-2.5 rounded-xl font-bold text-slate-300 bg-white/5 hover:bg-white/10 border border-white/10 transition-all">Cancel</button>
+              <button onClick={() => confirmDelete(deleteConfirmId)} className="px-5 py-2.5 rounded-xl font-bold text-white bg-red-600 hover:bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)] transition-all">Yes, Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GLASS TOAST NOTIFICATION */}
+      <div className={`fixed bottom-6 right-6 z-[80] transition-all duration-300 transform ${showToast ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'}`}>
+        <div className={`border px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-4 bg-[#1a2235]/80 backdrop-blur-xl ${toastType === 'success' ? 'border-white/10' : 'border-red-500/30'}`}>
+          <div className={`p-2 rounded-xl flex-shrink-0 ${toastType === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+            {toastType === 'success' ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg> : <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>}
+          </div>
+          <div>
+            <h4 className="font-bold text-sm text-white">{toastType === 'success' ? 'Success' : 'Error'}</h4>
+            <p className="text-xs text-slate-300">{toastMessage}</p>
+          </div>
+        </div>
+      </div>
+
     </div>
   );
 }

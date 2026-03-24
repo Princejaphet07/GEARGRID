@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDocs } from 'firebase/firestore'; // BAG-O: Gidugang ang getDocs
 import { db } from '../firebase';
 
 function Checkout() {
@@ -19,8 +19,6 @@ function Checkout() {
     }
   }, [itemsToCheckout, navigate]);
 
-  if (!itemsToCheckout || itemsToCheckout.length === 0) return null;
-
   const [shippingInfo, setShippingInfo] = useState({
     fullName: '',
     address: '',
@@ -29,17 +27,71 @@ function Checkout() {
     label: 'Home' 
   });
   
+  // BAG-O: State para sa mga na-save nga addresses
+  const [savedAddresses, setSavedAddresses] = useState([]);
+  
   const [deliveryOption, setDeliveryOption] = useState('standard');
   const [orderNote, setOrderNote] = useState('');
   const [paymentMethod, setPaymentMethod] = useState(initialPaymentMethod || 'cod');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // CHANGED: $15.00 → ₱15.00 (value stays numeric, only display changes)
-  const shippingFee = deliveryOption === 'express' ? 15.00 : 0.00;
-  const finalTotal = subtotal + estimatedTax + shippingFee - discount;
+  // BAG-O: Mo-fetch sa Saved Addresses gikan sa Profile/Addresses.jsx inig load sa Checkout
+  useEffect(() => {
+    const fetchSavedAddresses = async () => {
+      if (currentUser) {
+        try {
+          const querySnapshot = await getDocs(collection(db, 'users', currentUser.uid, 'addresses'));
+          const addresses = querySnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          setSavedAddresses(addresses);
+
+          // Pangitaon ang Default Address ug i-auto fill ang porma
+          const defaultAddress = addresses.find(addr => addr.isDefault) || addresses[0];
+          if (defaultAddress) {
+            setShippingInfo({
+              fullName: defaultAddress.fullName || '',
+              address: `${defaultAddress.street}, ${defaultAddress.barangay}`,
+              city: defaultAddress.city || '',
+              phone: defaultAddress.phone || '',
+              label: defaultAddress.label || 'Home'
+            });
+          }
+        } catch (error) {
+          console.error("Error fetching addresses:", error);
+        }
+      }
+    };
+
+    fetchSavedAddresses();
+  }, [currentUser]);
+
+  // BAG-O: Handle inig naay pilion sa Dropdown
+  const handleAddressSelect = (e) => {
+    const selectedId = e.target.value;
+    const selectedAddr = savedAddresses.find(addr => addr.id === selectedId);
+    if (selectedAddr) {
+      setShippingInfo({
+        fullName: selectedAddr.fullName || '',
+        address: `${selectedAddr.street}, ${selectedAddr.barangay}`,
+        city: selectedAddr.city || '',
+        phone: selectedAddr.phone || '',
+        label: selectedAddr.label || 'Home'
+      });
+    } else {
+      // Kung gi-clear ang selection
+      setShippingInfo({ fullName: '', address: '', city: '', phone: '', label: 'Home' });
+    }
+  };
+
+  if (!itemsToCheckout || itemsToCheckout.length === 0) return null;
+
+  const total = subtotal + estimatedTax - discount + (deliveryOption === 'express' ? 150 : 50);
 
   const handleInputChange = (e) => {
-    setShippingInfo({ ...shippingInfo, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setShippingInfo(prev => ({ ...prev, [name]: value }));
   };
 
   const handlePlaceOrder = async (e) => {
@@ -47,217 +99,330 @@ function Checkout() {
     setIsSubmitting(true);
 
     try {
-      await addDoc(collection(db, "orders"), {
+      // Create the order document
+      const orderData = {
         userId: currentUser ? currentUser.uid : 'guest',
+        customerName: shippingInfo.fullName || 'Guest User',
         items: itemsToCheckout,
-        shippingInfo,
+        subtotal,
+        estimatedTax,
+        discount,
+        total,
+        shippingInfo, // KANI MAOY BASAHON SA ADMIN
         deliveryOption,
         orderNote,
         paymentMethod,
-        financials: { subtotal, estimatedTax, discount, shippingFee, total: finalTotal },
         status: 'Pending',
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+      };
+
+      const docRef = await addDoc(collection(db, 'orders'), orderData);
+      console.log("Order placed with ID: ", docRef.id);
+
+      itemsToCheckout.forEach(item => {
+        removeFromCart(item.id);
       });
 
-      const sortedIndexes = [...itemsToCheckout].sort((a, b) => b.cartIndex - a.cartIndex);
-      sortedIndexes.forEach(item => {
-        removeFromCart(item.cartIndex);
+      navigate('/orders', { 
+        state: { 
+          orderSuccess: true,
+          orderId: docRef.id
+        } 
       });
-
-      alert("🎉 Order placed successfully! Thank you for shopping with GearGrid.");
-      navigate('/orders'); 
 
     } catch (error) {
-      console.error("Error placing order: ", error);
-      alert("There was an error placing your order. Please try again.");
+      console.error("Error placing order:", error);
+      alert("Failed to place order. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="bg-[#0f1522] min-h-screen py-8 pb-24 text-gray-200 font-sans selection:bg-blue-500/30">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="bg-[#0f1522] min-h-screen pt-8 pb-20 font-sans selection:bg-blue-500/30">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        <div className="mb-6">
-          <h1 className="text-2xl font-black text-white flex items-center gap-3">
-            <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            Secure Checkout
-          </h1>
+        {/* Header */}
+        <div className="mb-8 flex items-center gap-4">
+          <Link to="/cart" className="w-10 h-10 bg-[#1a2235] border border-[#232d40] rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:border-blue-500 transition-all">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          </Link>
+          <div>
+            <h1 className="text-2xl font-black text-white tracking-tight">Checkout</h1>
+            <p className="text-sm text-slate-400">Complete your order details</p>
+          </div>
         </div>
 
-        <form onSubmit={handlePlaceOrder} className="lg:grid lg:grid-cols-12 lg:gap-6 items-start">
+        <div className="flex flex-col lg:flex-row gap-8">
           
-          <section className="lg:col-span-8 space-y-4">
-            
-            <div className="bg-[#1f2937] border border-gray-800 rounded-xl p-6 relative overflow-hidden">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                  Delivery Address
+          {/* Left Column - Forms */}
+          <div className="w-full lg:w-2/3 space-y-6">
+            <form id="checkout-form" onSubmit={handlePlaceOrder} className="space-y-6">
+              
+              {/* Shipping Details */}
+              <div className="bg-[#1a2235] border border-[#232d40] rounded-2xl p-6 shadow-xl relative overflow-hidden group">
+                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500 transform origin-top scale-y-0 group-hover:scale-y-100 transition-transform duration-300"></div>
+                <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center">1</span>
+                  Shipping Details
                 </h2>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setShippingInfo({...shippingInfo, label: 'Home'})} className={`px-3 py-1 text-xs font-bold rounded-full border transition-colors ${shippingInfo.label === 'Home' ? 'bg-blue-500/10 border-blue-500 text-blue-400' : 'border-gray-600 text-gray-400'}`}>Home</button>
-                  <button type="button" onClick={() => setShippingInfo({...shippingInfo, label: 'Office'})} className={`px-3 py-1 text-xs font-bold rounded-full border transition-colors ${shippingInfo.label === 'Office' ? 'bg-blue-500/10 border-blue-500 text-blue-400' : 'border-gray-600 text-gray-400'}`}>Office</button>
+
+                {/* BAG-O: Select Saved Address Dropdown */}
+                {savedAddresses.length > 0 && (
+                  <div className="mb-6 p-4 bg-[#0f1522] border border-blue-500/20 rounded-xl">
+                    <label className="block text-sm font-bold text-blue-400 mb-2">Use a Saved Address</label>
+                    <select 
+                      onChange={handleAddressSelect}
+                      className="w-full bg-[#1a2235] border border-[#232d40] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all appearance-none cursor-pointer"
+                    >
+                      <option value="">-- Choose an address or enter manually below --</option>
+                      {savedAddresses.map(addr => (
+                        <option key={addr.id} value={addr.id}>
+                          {addr.label || 'Address'} - {addr.street}, {addr.barangay}, {addr.city}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-bold text-slate-400 mb-2">Full Name</label>
+                    <input 
+                      type="text" 
+                      name="fullName"
+                      value={shippingInfo.fullName}
+                      onChange={handleInputChange}
+                      required
+                      className="w-full bg-[#0f1522] border border-[#232d40] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                      placeholder="Juan Dela Cruz"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-bold text-slate-400 mb-2">Full Address (Street, Barangay)</label>
+                    <input 
+                      type="text" 
+                      name="address"
+                      value={shippingInfo.address}
+                      onChange={handleInputChange}
+                      required
+                      className="w-full bg-[#0f1522] border border-[#232d40] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                      placeholder="123 Main St, Brgy. San Jose"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-400 mb-2">City</label>
+                    <input 
+                      type="text" 
+                      name="city"
+                      value={shippingInfo.city}
+                      onChange={handleInputChange}
+                      required
+                      className="w-full bg-[#0f1522] border border-[#232d40] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                      placeholder="Cebu City"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-400 mb-2">Phone Number</label>
+                    <input 
+                      type="tel" 
+                      name="phone"
+                      value={shippingInfo.phone}
+                      onChange={handleInputChange}
+                      required
+                      className="w-full bg-[#0f1522] border border-[#232d40] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                      placeholder="09123456789"
+                    />
+                  </div>
                 </div>
               </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input required type="text" name="fullName" value={shippingInfo.fullName} onChange={handleInputChange} className="w-full bg-[#111827] border border-gray-700 focus:border-blue-500 rounded-lg px-4 py-2.5 text-white text-sm" placeholder="Full Name" />
-                <input required type="tel" name="phone" value={shippingInfo.phone} onChange={handleInputChange} className="w-full bg-[#111827] border border-gray-700 focus:border-blue-500 rounded-lg px-4 py-2.5 text-white text-sm" placeholder="Phone Number (e.g. 09123456789)" />
-                <input required type="text" name="address" value={shippingInfo.address} onChange={handleInputChange} className="w-full bg-[#111827] border border-gray-700 focus:border-blue-500 rounded-lg px-4 py-2.5 text-white text-sm md:col-span-2" placeholder="Street Name, Building, House No." />
-                <input required type="text" name="city" value={shippingInfo.city} onChange={handleInputChange} className="w-full bg-[#111827] border border-gray-700 focus:border-blue-500 rounded-lg px-4 py-2.5 text-white text-sm md:col-span-2" placeholder="City / Municipality / Province" />
-              </div>
-            </div>
 
-            <div className="bg-[#1f2937] border border-gray-800 rounded-xl overflow-hidden">
-              <div className="p-6 space-y-6">
+              {/* Delivery Options */}
+              <div className="bg-[#1a2235] border border-[#232d40] rounded-2xl p-6 shadow-xl relative overflow-hidden group">
+                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500 transform origin-top scale-y-0 group-hover:scale-y-100 transition-transform duration-300"></div>
+                <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center">2</span>
+                  Delivery Method
+                </h2>
                 
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
-                  Order Items
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Standard */}
+                  <div 
+                    onClick={() => setDeliveryOption('standard')}
+                    className={`border rounded-xl p-4 cursor-pointer transition-all ${
+                      deliveryOption === 'standard' 
+                      ? 'border-blue-500 bg-blue-500/10' 
+                      : 'border-[#232d40] bg-[#0f1522] hover:border-slate-500'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${deliveryOption === 'standard' ? 'border-blue-500' : 'border-slate-500'}`}>
+                          {deliveryOption === 'standard' && <div className="w-2 h-2 bg-blue-500 rounded-full"></div>}
+                        </div>
+                        <span className="font-bold text-white">Standard Delivery</span>
+                      </div>
+                      <span className="text-slate-400 font-bold">₱50.00</span>
+                    </div>
+                    <p className="text-xs text-slate-500 ml-6">3-5 Business Days</p>
+                  </div>
+
+                  {/* Express */}
+                  <div 
+                    onClick={() => setDeliveryOption('express')}
+                    className={`border rounded-xl p-4 cursor-pointer transition-all ${
+                      deliveryOption === 'express' 
+                      ? 'border-blue-500 bg-blue-500/10' 
+                      : 'border-[#232d40] bg-[#0f1522] hover:border-slate-500'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${deliveryOption === 'express' ? 'border-blue-500' : 'border-slate-500'}`}>
+                          {deliveryOption === 'express' && <div className="w-2 h-2 bg-blue-500 rounded-full"></div>}
+                        </div>
+                        <span className="font-bold text-white">Express Delivery</span>
+                      </div>
+                      <span className="text-slate-400 font-bold">₱150.00</span>
+                    </div>
+                    <p className="text-xs text-slate-500 ml-6">1-2 Business Days</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Method */}
+              <div className="bg-[#1a2235] border border-[#232d40] rounded-2xl p-6 shadow-xl relative overflow-hidden group">
+                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500 transform origin-top scale-y-0 group-hover:scale-y-100 transition-transform duration-300"></div>
+                <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center">3</span>
+                  Payment Method
                 </h2>
 
-                {itemsToCheckout.map((item, idx) => (
-                  <div key={idx} className="flex gap-4">
-                    <img src={item.image} className="w-20 h-20 rounded-lg bg-[#111827] object-cover border border-gray-700 p-1" alt={item.name} />
-                    <div className="flex-1">
-                      <h4 className="text-base font-bold text-white line-clamp-2 leading-tight">{item.name}</h4>
-                      <p className="text-xs text-gray-400 mt-1">Category: {item.category}</p>
-                      <div className="flex justify-between items-end mt-2">
-                        {/* CHANGED: $ → ₱ */}
-                        <span className="text-lg font-bold text-blue-400">₱{Number(item.price).toFixed(2)}</span>
-                        <span className="text-sm font-medium text-gray-400">Qty: {item.checkoutQuantity}</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* COD */}
+                  <div 
+                    onClick={() => setPaymentMethod('cod')}
+                    className={`border rounded-xl p-4 cursor-pointer transition-all flex items-center gap-3 ${
+                      paymentMethod === 'cod' 
+                      ? 'border-blue-500 bg-blue-500/10' 
+                      : 'border-[#232d40] bg-[#0f1522] hover:border-slate-500'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentMethod === 'cod' ? 'border-blue-500' : 'border-slate-500'}`}>
+                      {paymentMethod === 'cod' && <div className="w-2 h-2 bg-blue-500 rounded-full"></div>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                      <div>
+                        <p className="font-bold text-white text-sm">Cash on Delivery</p>
+                        <p className="text-[10px] text-slate-500">Pay when you receive</p>
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Order Notes */}
+              <div className="bg-[#1a2235] border border-[#232d40] rounded-2xl p-6 shadow-xl">
+                <label className="block text-sm font-bold text-slate-400 mb-2">Order Notes (Optional)</label>
+                <textarea 
+                  rows="3"
+                  value={orderNote}
+                  onChange={(e) => setOrderNote(e.target.value)}
+                  className="w-full bg-[#0f1522] border border-[#232d40] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all resize-none"
+                  placeholder="Notes about your order, e.g. special notes for delivery."
+                ></textarea>
+              </div>
+
+            </form>
+          </div>
+
+          {/* Right Column - Order Summary */}
+          <div className="w-full lg:w-1/3">
+            <div className="bg-[#1a2235] border border-[#232d40] rounded-2xl shadow-xl sticky top-24 overflow-hidden">
+              <div className="p-6 border-b border-[#232d40] bg-[#0f1522]">
+                <h2 className="text-lg font-bold text-white">Order Summary</h2>
+                <p className="text-xs text-slate-500 mt-1">{itemsToCheckout.length} {itemsToCheckout.length === 1 ? 'Item' : 'Items'} in cart</p>
+              </div>
+              
+              <div className="p-6 max-h-[40vh] overflow-y-auto no-scrollbar space-y-4 border-b border-[#232d40]">
+                {itemsToCheckout.map((item) => (
+                  <div key={item.id} className="flex gap-4">
+                    <div className="w-16 h-16 bg-[#0f1522] rounded-xl border border-[#232d40] overflow-hidden flex-shrink-0">
+                      <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="flex-grow">
+                      <h4 className="text-sm font-bold text-white line-clamp-1">{item.name}</h4>
+                      <p className="text-xs text-slate-400 mt-0.5">Qty: {item.quantity}</p>
+                      <p className="text-sm font-bold text-blue-400 mt-1">₱{(parseFloat(item.price.replace('₱', '').replace(',', '')) * item.quantity).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    </div>
+                  </div>
                 ))}
-
-                <div className="border-t border-gray-800 pt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-300 mb-3">Delivery Option</h3>
-                    <div className="space-y-3">
-                      <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${deliveryOption === 'standard' ? 'border-blue-500 bg-blue-500/5' : 'border-gray-700 bg-[#111827] hover:border-gray-500'}`}>
-                        <input type="radio" name="delivery" value="standard" checked={deliveryOption === 'standard'} onChange={() => setDeliveryOption('standard')} className="mt-1 w-4 h-4 text-blue-600 bg-gray-800 border-gray-600 focus:ring-blue-500" />
-                        <div className="flex-1">
-                          <div className="flex justify-between">
-                            <span className="text-sm font-bold text-white">Standard Delivery</span>
-                            <span className="text-sm font-bold text-emerald-400">FREE</span>
-                          </div>
-                          <p className="text-xs text-gray-400 mt-0.5">Receive by {new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toLocaleDateString()}</p>
-                        </div>
-                      </label>
-
-                      <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${deliveryOption === 'express' ? 'border-blue-500 bg-blue-500/5' : 'border-gray-700 bg-[#111827] hover:border-gray-500'}`}>
-                        <input type="radio" name="delivery" value="express" checked={deliveryOption === 'express'} onChange={() => setDeliveryOption('express')} className="mt-1 w-4 h-4 text-blue-600 bg-gray-800 border-gray-600 focus:ring-blue-500" />
-                        <div className="flex-1">
-                          <div className="flex justify-between">
-                            <span className="text-sm font-bold text-white">Express Delivery</span>
-                            {/* CHANGED: $ → ₱ */}
-                            <span className="text-sm font-bold text-white">₱15.00</span>
-                          </div>
-                          <p className="text-xs text-gray-400 mt-0.5">Receive by {new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toLocaleDateString()}</p>
-                        </div>
-                      </label>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-300 mb-3">Message</h3>
-                    <textarea 
-                      value={orderNote}
-                      onChange={(e) => setOrderNote(e.target.value)}
-                      placeholder="(Optional) Leave a message to seller or courier..."
-                      className="w-full bg-[#111827] border border-gray-700 focus:border-blue-500 rounded-lg px-4 py-3 text-white text-sm h-[110px] resize-none"
-                    ></textarea>
-                  </div>
-                </div>
-
               </div>
-            </div>
 
-            <div className="bg-[#1f2937] border border-gray-800 rounded-xl p-6">
-               <h2 className="text-lg font-bold text-white mb-4">Payment Method</h2>
-               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <button type="button" onClick={() => setPaymentMethod('cod')} className={`py-3 px-2 rounded-lg border text-sm font-bold flex flex-col items-center gap-2 transition-all ${paymentMethod === 'cod' ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400' : 'border-gray-700 bg-[#111827] text-gray-400 hover:border-gray-500'}`}>
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-                    Cash on Delivery
-                  </button>
-                  <button type="button" onClick={() => setPaymentMethod('gcash')} className={`py-3 px-2 rounded-lg border text-sm font-bold flex flex-col items-center gap-2 transition-all ${paymentMethod === 'gcash' ? 'border-blue-500 bg-blue-500/10 text-blue-400' : 'border-gray-700 bg-[#111827] text-gray-400 hover:border-gray-500'}`}>
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-                    GCash
-                  </button>
-                  <button type="button" disabled className="py-3 px-2 rounded-lg border border-gray-800 bg-[#111827]/50 text-gray-600 text-sm font-bold flex flex-col items-center gap-2 cursor-not-allowed">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
-                    Credit Card
-                  </button>
-               </div>
-            </div>
-          </section>
-
-          <section className="mt-8 lg:mt-0 lg:col-span-4 sticky top-6">
-            <div className="bg-[#1f2937] border border-gray-800 rounded-xl shadow-2xl overflow-hidden">
-              <div className="p-6">
-                <h2 className="text-lg font-bold text-white mb-6">Order Summary</h2>
+              <div className="p-6 space-y-4">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Subtotal</span>
+                  <span className="font-medium text-white">₱{subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
                 
-                <div className="space-y-3">
-                  <div className="flex justify-between text-gray-400 text-sm">
-                    <span>Items Subtotal ({itemsToCheckout.length})</span>
-                    {/* CHANGED: $ → ₱ */}
-                    <span className="text-white">₱{subtotal.toFixed(2)}</span>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Shipping</span>
+                  <span className="font-medium text-white">₱{(deliveryOption === 'express' ? 150 : 50).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Tax (12%)</span>
+                  <span className="font-medium text-white">₱{estimatedTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+
+                {discount > 0 && (
+                  <div className="flex justify-between text-sm text-emerald-400">
+                    <span>Discount Applied</span>
+                    <span>-₱{discount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
-                  <div className="flex justify-between text-gray-400 text-sm">
-                    <span>Shipping Fee</span>
-                    {shippingFee === 0 ? (
-                      <span className="text-emerald-400 font-bold">FREE</span>
-                    ) : (
-                      // CHANGED: $ → ₱
-                      <span className="text-white">₱{shippingFee.toFixed(2)}</span>
-                    )}
-                  </div>
-                  <div className="flex justify-between text-gray-400 text-sm">
-                    <span>Estimated Tax</span>
-                    {/* CHANGED: $ → ₱ */}
-                    <span className="text-white">₱{estimatedTax.toFixed(2)}</span>
-                  </div>
-                  {discount > 0 && (
-                    <div className="flex justify-between text-emerald-400 text-sm">
-                      <span>Voucher Discount</span>
-                      {/* CHANGED: $ → ₱ */}
-                      <span>-₱{discount.toFixed(2)}</span>
+                )}
+
+                <div className="pt-4 border-t border-[#232d40]">
+                  <div className="flex justify-between items-end mb-4">
+                    <span className="text-base font-bold text-white">Total</span>
+                    <div className="text-right">
+                      <span className="text-2xl font-black text-blue-400 tracking-tight">₱{total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider">VAT Included</p>
                     </div>
-                  )}
-                </div>
-
-                <div className="flex justify-between items-end my-6 pt-4 border-t border-gray-800">
-                  <span className="text-sm font-medium text-gray-400">Total Payment</span>
-                  <div className="text-right">
-                    {/* CHANGED: $ → ₱ */}
-                    <span className="text-3xl font-black text-blue-500">₱{finalTotal.toFixed(2)}</span>
-                    <p className="text-[10px] text-gray-500 mt-1 uppercase tracking-wider">VAT Included, where applicable</p>
                   </div>
-                </div>
 
-                <button 
-                  type="submit"
-                  disabled={isSubmitting}
-                  className={`w-full py-4 rounded-xl font-bold text-lg flex justify-center items-center gap-2 transition-all shadow-[0_4px_15px_rgba(37,99,235,0.3)]
-                    ${isSubmitting ? 'bg-blue-800 text-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white active:scale-[0.98]'}`}
-                >
-                  {isSubmitting ? 'Processing...' : 'Place Order'}
-                </button>
+                  <button 
+                    type="submit"
+                    form="checkout-form"
+                    disabled={isSubmitting}
+                    className={`w-full py-4 rounded-xl font-bold text-base flex justify-center items-center gap-2 transition-all shadow-lg
+                      ${isSubmitting 
+                        ? 'bg-[#232d40] text-slate-500 cursor-not-allowed' 
+                        : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/20 active:scale-[0.98]'}`}
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        Processing...
+                      </>
+                    ) : (
+                      'Place Order'
+                    )}
+                  </button>
+                </div>
               </div>
 
-              <div className="bg-[#111827] px-6 py-4 border-t border-gray-800 flex flex-col gap-2">
-                <div className="flex items-center gap-2 text-xs text-gray-400">
-                  <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"></path></svg>
-                  <span><strong>GearGrid Guarantee:</strong> Get the exact items you ordered or your money back.</span>
+              <div className="bg-[#0f1522] px-6 py-4 border-t border-[#232d40] flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                  <span>Secure checkout process</span>
                 </div>
               </div>
             </div>
-          </section>
+          </div>
 
-        </form>
+        </div>
       </div>
     </div>
   );

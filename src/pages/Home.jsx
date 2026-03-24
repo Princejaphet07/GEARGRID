@@ -118,17 +118,6 @@ function Home() {
                   Schedule Service
                 </Link>
               </div>
-
-              <div className="flex items-center gap-4">
-                <div className="flex -space-x-3">
-                  <img src="https://i.pravatar.cc/100?img=33" alt="User 1" className="w-10 h-10 rounded-full border-2 border-[#0f1522]" />
-                  <img src="https://i.pravatar.cc/100?img=12" alt="User 2" className="w-10 h-10 rounded-full border-2 border-[#0f1522]" />
-                  <img src="https://i.pravatar.cc/100?img=59" alt="User 3" className="w-10 h-10 rounded-full border-2 border-[#0f1522]" />
-                </div>
-                <p className="text-sm text-gray-400">
-                  Trusted by <span className="font-bold text-white">5,000+</span> drivers this month
-                </p>
-              </div>
             </div>
           </div>
         </section>
@@ -171,6 +160,7 @@ function Home() {
         </section>
       )}
 
+      {/* --- TRENDING PRODUCTS SECTION --- */}
       <section className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 mt-24">
         {!searchQuery && (
           <div className="flex justify-between items-end mb-8">
@@ -186,7 +176,6 @@ function Home() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {loadingDeals ? (
-            /* --- KANI ANG BAG-O NGA LOADER (GIKOPYA GIKAN SA Parts.jsx) --- */
             Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="bg-[#1a2235] border border-gray-800 rounded-2xl overflow-hidden animate-pulse">
                 <div className="h-56 bg-gray-800 w-full"></div>
@@ -200,7 +189,6 @@ function Home() {
                 </div>
               </div>
             ))
-            /* ----------------------------------------------------------------- */
           ) : filteredDeals.length === 0 ? (
             <div className="col-span-4 bg-[#161d2b] border border-[#232d40] rounded-2xl p-12 text-center">
               {searchQuery ? (
@@ -217,14 +205,15 @@ function Home() {
             filteredDeals.map((deal) => (
               <div key={deal.id} className="relative bg-[#161d2b] border border-[#232d40] hover:border-blue-500/50 rounded-2xl overflow-hidden transition-all group flex flex-col shadow-lg">
                 
-                <div className="h-56 bg-[#0f1522] relative p-6 flex items-center justify-center">
+                {/* EDGE TO EDGE IMAGE CONTAINER */}
+                <div className="h-56 bg-[#0f1522] relative overflow-hidden">
                   <span className="absolute top-3 left-3 bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider z-10">
                     {deal.category || 'Part'}
                   </span>
                   <img 
                     src={deal.image} 
                     alt={deal.name} 
-                    className="h-full object-contain drop-shadow-2xl transition-transform duration-500 group-hover:scale-110" 
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
                   />
                 </div>
                 
@@ -273,24 +262,41 @@ function Home() {
         )}
       </section>
 
-      <div className={`fixed bottom-6 right-6 z-50 transition-all duration-300 transform ${showToast ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'}`}>
-        <div className="bg-[#1a2235] border border-[#232d40] text-white px-5 py-4 rounded-2xl shadow-2xl shadow-black/50 flex items-center gap-4">
-          <div className="bg-blue-500/20 text-blue-500 p-2 rounded-xl flex-shrink-0">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      {/* GLASSMORPHISM TOAST ALERT */}
+      <div className={`fixed bottom-6 right-6 z-50 transition-all duration-500 transform ${showToast ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'}`}>
+        <div className="relative overflow-hidden bg-[#0f1522]/60 backdrop-blur-xl border border-white/10 px-5 py-4 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.5)] flex items-center gap-4">
+          
+          {/* Subtle gradient glow background effect */}
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 to-transparent opacity-50"></div>
+
+          {/* Icon */}
+          <div className="relative bg-gradient-to-br from-blue-500/20 to-blue-600/10 text-blue-400 p-2.5 rounded-xl flex-shrink-0 border border-blue-500/20 shadow-[0_0_15px_rgba(37,99,235,0.2)]">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <div>
-            <h4 className="font-bold text-sm text-white">Success</h4>
-            <p className="text-xs text-gray-400">{toastMessage}</p>
+          
+          {/* Text */}
+          <div className="relative pr-4">
+            <h4 className="font-bold text-sm text-white tracking-wide">Success</h4>
+            <p className="text-xs text-slate-300 mt-0.5">{toastMessage}</p>
           </div>
+
+          {/* Optional: Animated loading bar at the bottom to show time remaining */}
+          <div className="absolute bottom-0 left-0 h-[2px] bg-blue-500 animate-[shrink_3s_linear_forwards]" style={{ width: '100%' }}></div>
         </div>
       </div>
       
+      {/* CSS For Scrollbar and Animation */}
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 4px; }
+
+        @keyframes shrink {
+          from { width: 100%; }
+          to { width: 0%; }
+        }
       `}} />
     </div>
   );

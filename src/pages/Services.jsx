@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { doc, getDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
@@ -17,8 +17,11 @@ function Services() {
   
   const timeSlots = ['09:00 AM', '10:30 AM', '01:00 PM', '02:00 PM', '03:30 PM'];
 
+  // 🔥 BAG-O: State para ma-track ang kasamtangang buwan ug tuig nga gitan-aw
+  const [currentViewDate, setCurrentViewDate] = useState(new Date());
+
   const [selectedService, setSelectedService] = useState(servicesList[0]);
-  const [selectedDay, setSelectedDay] = useState(5);
+  const [selectedDay, setSelectedDay] = useState(new Date().getDate()); // Default to today's date
   const [selectedTime, setSelectedTime] = useState('02:00 PM');
   const [isBooking, setIsBooking] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
@@ -38,9 +41,56 @@ function Services() {
     fetchUserData();
   }, [currentUser]);
 
+  // 🔥 BAG-O: Dynamic generation sa mga adlaw sa kalendaryo base sa currentViewDate
+  const calendarDays = useMemo(() => {
+    const year = currentViewDate.getFullYear();
+    const month = currentViewDate.getMonth();
+
+    const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 (Sun) to 6 (Sat)
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+    const days = [];
+
+    // Mga adlaw sa niaging buwan (para mapuno ang una nga row)
+    for (let i = firstDayOfMonth - 1; i >= 0; i--) {
+      days.push({ day: daysInPrevMonth - i, currentMonth: false });
+    }
+
+    // Mga adlaw sa karon nga buwan
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push({ day: i, currentMonth: true });
+    }
+
+    // Mga adlaw sa sunod nga buwan (para ma-kumpleto ang last row)
+    const totalDaysAdded = days.length;
+    const remainingCells = (Math.ceil(totalDaysAdded / 7) * 7) - totalDaysAdded;
+    for (let i = 1; i <= remainingCells; i++) {
+      days.push({ day: i, currentMonth: false });
+    }
+
+    return days;
+  }, [currentViewDate]);
+
+  // 🔥 BAG-O: Functions para sa Left ug Right buttons
+  const handlePrevMonth = () => {
+    setCurrentViewDate(new Date(currentViewDate.getFullYear(), currentViewDate.getMonth() - 1, 1));
+    setSelectedDay(null); // Reset day selection inig ilis og buwan
+  };
+
+  const handleNextMonth = () => {
+    setCurrentViewDate(new Date(currentViewDate.getFullYear(), currentViewDate.getMonth() + 1, 1));
+    setSelectedDay(null); // Reset day selection inig ilis og buwan
+  };
+
+  // Mga text para sa Display
+  const currentMonthYearText = currentViewDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+  const currentMonthText = currentViewDate.toLocaleString('default', { month: 'long' });
+  const currentYear = currentViewDate.getFullYear();
+
   // KANI ANG FUNCTION MO-SAVE SA FIREBASE
   const handleConfirmBooking = async () => {
-    if (!currentUser) return;
+    if (!currentUser || !selectedDay) return; // Make sure a day is selected
     setIsBooking(true);
 
     try {
@@ -50,7 +100,7 @@ function Services() {
         customerEmail: currentUser.email,
         service: selectedService.name,
         price: selectedService.price,
-        date: `October ${selectedDay}, 2023`, // Static month for now based sa imong design
+        date: `${currentMonthText} ${selectedDay}, ${currentYear}`, // 🔥 Updated to use dynamic date
         time: selectedTime,
         status: 'Pending',
         mechanic: 'Unassigned',
@@ -75,19 +125,6 @@ function Services() {
       setIsBooking(false);
     }
   };
-
-  const calendarDays = [
-    { day: 27, currentMonth: false }, { day: 28, currentMonth: false }, { day: 29, currentMonth: false }, { day: 30, currentMonth: false },
-    { day: 1, currentMonth: true }, { day: 2, currentMonth: true }, { day: 3, currentMonth: true },
-    { day: 4, currentMonth: true }, { day: 5, currentMonth: true }, { day: 6, currentMonth: true }, { day: 7, currentMonth: true },
-    { day: 8, currentMonth: true }, { day: 9, currentMonth: true }, { day: 10, currentMonth: true },
-    { day: 11, currentMonth: true }, { day: 12, currentMonth: true }, { day: 13, currentMonth: true }, { day: 14, currentMonth: true },
-    { day: 15, currentMonth: true }, { day: 16, currentMonth: true }, { day: 17, currentMonth: true },
-    { day: 18, currentMonth: true }, { day: 19, currentMonth: true }, { day: 20, currentMonth: true }, { day: 21, currentMonth: true },
-    { day: 22, currentMonth: true }, { day: 23, currentMonth: true }, { day: 24, currentMonth: true }, { day: 25, currentMonth: true },
-    { day: 26, currentMonth: true }, { day: 27, currentMonth: true }, { day: 28, currentMonth: true }, { day: 29, currentMonth: true },
-    { day: 30, currentMonth: true }, { day: 31, currentMonth: true }
-  ];
 
   return (
     <div className="min-h-screen bg-[#0f1522] font-sans pb-20 pt-8 relative">
@@ -142,9 +179,12 @@ function Services() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div>
                   <div className="flex justify-between items-center mb-4">
-                    <button className="text-slate-400 hover:text-white transition-colors p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
-                    <span className="text-white font-bold">October 2023</span>
-                    <button className="text-slate-400 hover:text-white transition-colors p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>
+                    {/* 🔥 Gidugang ang onClick=handlePrevMonth */}
+                    <button onClick={handlePrevMonth} className="text-slate-400 hover:text-white transition-colors p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
+                    {/* 🔥 Dynamic Month ug Year */}
+                    <span className="text-white font-bold">{currentMonthYearText}</span>
+                    {/* 🔥 Gidugang ang onClick=handleNextMonth */}
+                    <button onClick={handleNextMonth} className="text-slate-400 hover:text-white transition-colors p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>
                   </div>
                   <div className="grid grid-cols-7 gap-1 text-center mb-2">
                     {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
@@ -225,7 +265,8 @@ function Services() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400">Date</span>
-                  <span className="font-medium">October {selectedDay}, 2023</span>
+                  {/* 🔥 Dynamic summary date */}
+                  <span className="font-medium">{selectedDay ? `${currentMonthText} ${selectedDay}, ${currentYear}` : 'Select a day'}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400">Time Slot</span>
@@ -239,10 +280,10 @@ function Services() {
               </div>
 
               <button 
-                disabled={!currentUser || isBooking}
+                disabled={!currentUser || !selectedDay || isBooking}
                 onClick={handleConfirmBooking}
                 className={`w-full font-bold py-3.5 rounded-xl flex justify-center items-center gap-2 transition-colors mb-4 ${
-                  currentUser && !isBooking
+                  currentUser && selectedDay && !isBooking
                     ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20" 
                     : "bg-slate-700 text-slate-400 cursor-not-allowed"
                 }`}
