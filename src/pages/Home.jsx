@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext'; 
 import { doc, getDoc, collection, getDocs, query, limit, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
+// NEW: Realistic Icon Imports
+import { Settings, Wind, Disc, Sparkles, ChevronRight, ShoppingCart } from 'lucide-react';
 
 function Home() {
   const { currentUser } = useAuth(); 
@@ -28,11 +30,32 @@ function Home() {
       )
     : flashDeals;
 
+  // UPDATED: Realistic Icon mapping
   const categories = [
-    { name: 'Engine Parts', subtitle: 'Performance & Maintenance', icon: '⚙️', path: '/parts?category=engine' },
-    { name: 'Exhaust Systems', subtitle: 'High-Flow Technology', icon: '📐', path: '/parts?category=exhaust' },
-    { name: 'Tires & Wheels', subtitle: 'Premium Rubber & Alloys', icon: '🛞', path: '/parts?category=tires' },
-    { name: 'Accessories', subtitle: 'Interior & Exterior Care', icon: '✨', path: '/parts?category=accessories' },
+    { 
+      name: 'Engine Parts', 
+      subtitle: 'Performance & Maintenance', 
+      icon: <Settings size={22} strokeWidth={2.5} />, 
+      path: '/parts?category=engine' 
+    },
+    { 
+      name: 'Exhaust Systems', 
+      subtitle: 'High-Flow Technology', 
+      icon: <Wind size={22} strokeWidth={2.5} />, 
+      path: '/parts?category=exhaust' 
+    },
+    { 
+      name: 'Tires & Wheels', 
+      subtitle: 'Premium Rubber & Alloys', 
+      icon: <Disc size={22} strokeWidth={2.5} />, 
+      path: '/parts?category=tires' 
+    },
+    { 
+      name: 'Accessories', 
+      subtitle: 'Interior & Exterior Care', 
+      icon: <Sparkles size={22} strokeWidth={2.5} />, 
+      path: '/parts?category=accessories' 
+    },
   ];
 
   useEffect(() => {
@@ -111,8 +134,8 @@ function Home() {
               </p>
               
               <div className="flex flex-wrap gap-4 items-center mb-10">
-                <Link to="/parts" className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm py-3.5 px-8 rounded-lg transition-colors shadow-lg shadow-blue-600/20">
-                  Explore Parts &rarr;
+                <Link to="/parts" className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm py-3.5 px-8 rounded-lg transition-colors shadow-lg shadow-blue-600/20 flex items-center gap-2">
+                  Explore Parts <ChevronRight size={18} />
                 </Link>
                 <Link to="/services" className="bg-[#1f2937]/50 backdrop-blur-sm border border-gray-600 hover:border-gray-400 hover:bg-white/10 text-white font-bold text-sm py-3.5 px-8 rounded-lg transition-all">
                   Schedule Service
@@ -142,16 +165,17 @@ function Home() {
         </section>
       )}
 
+      {/* UPDATED CATEGORIES SECTION */}
       {!searchQuery && (
         <section className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 mt-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {categories.map((cat, idx) => (
-              <Link key={idx} to={cat.path} className="bg-[#161d2b] border border-[#232d40] hover:border-gray-500 rounded-2xl p-6 flex flex-col items-start gap-4 transition-all group cursor-pointer">
-                <div className="w-10 h-10 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
+              <Link key={idx} to={cat.path} className="bg-[#161d2b] border border-[#232d40] hover:border-blue-500/50 hover:bg-[#1c2538] rounded-2xl p-6 flex flex-col items-start gap-4 transition-all group cursor-pointer shadow-lg">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/5 text-blue-400 flex items-center justify-center group-hover:scale-110 group-hover:text-blue-300 transition-all border border-blue-500/10 shadow-[0_0_15px_rgba(37,99,235,0.1)]">
                   {cat.icon}
                 </div>
                 <div>
-                  <h3 className="font-bold text-white text-base mb-1">{cat.name}</h3>
+                  <h3 className="font-bold text-white text-base mb-1 group-hover:text-blue-400 transition-colors">{cat.name}</h3>
                   <p className="text-gray-400 text-xs">{cat.subtitle}</p>
                 </div>
               </Link>
@@ -205,13 +229,12 @@ function Home() {
             filteredDeals.map((deal) => (
               <div key={deal.id} className="relative bg-[#161d2b] border border-[#232d40] hover:border-blue-500/50 rounded-2xl overflow-hidden transition-all group flex flex-col shadow-lg">
                 
-                {/* EDGE TO EDGE IMAGE CONTAINER */}
                 <div className="h-56 bg-[#0f1522] relative overflow-hidden">
                   <span className="absolute top-3 left-3 bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider z-10">
                     {deal.category || 'Part'}
                   </span>
                   <img 
-                    src={deal.image} 
+                    src={deal.image || 'https://via.placeholder.com/300x200/1f2937/ffffff?text=No+Image'} 
                     alt={deal.name} 
                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
                   />
@@ -243,9 +266,7 @@ function Home() {
                       onClick={(e) => { e.stopPropagation(); handleAddToCart(deal); }} 
                       className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-[0_4px_15px_rgba(37,99,235,0.4)] active:scale-95 flex items-center justify-center gap-2"
                     >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-                      </svg>
+                      <ShoppingCart size={18} />
                       Add to Cart
                     </button>
                   </div>
@@ -265,29 +286,20 @@ function Home() {
       {/* GLASSMORPHISM TOAST ALERT */}
       <div className={`fixed bottom-6 right-6 z-50 transition-all duration-500 transform ${showToast ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'}`}>
         <div className="relative overflow-hidden bg-[#0f1522]/60 backdrop-blur-xl border border-white/10 px-5 py-4 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.5)] flex items-center gap-4">
-          
-          {/* Subtle gradient glow background effect */}
           <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 to-transparent opacity-50"></div>
-
-          {/* Icon */}
           <div className="relative bg-gradient-to-br from-blue-500/20 to-blue-600/10 text-blue-400 p-2.5 rounded-xl flex-shrink-0 border border-blue-500/20 shadow-[0_0_15px_rgba(37,99,235,0.2)]">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          
-          {/* Text */}
           <div className="relative pr-4">
             <h4 className="font-bold text-sm text-white tracking-wide">Success</h4>
             <p className="text-xs text-slate-300 mt-0.5">{toastMessage}</p>
           </div>
-
-          {/* Optional: Animated loading bar at the bottom to show time remaining */}
           <div className="absolute bottom-0 left-0 h-[2px] bg-blue-500 animate-[shrink_3s_linear_forwards]" style={{ width: '100%' }}></div>
         </div>
       </div>
       
-      {/* CSS For Scrollbar and Animation */}
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }

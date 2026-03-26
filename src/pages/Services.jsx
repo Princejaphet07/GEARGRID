@@ -9,7 +9,6 @@ function Services() {
   const navigate = useNavigate();
   const [userData, setUserData] = useState({ name: '', profilePic: '' });
 
-  // MGA BAG-ONG STATE PARA SA PAG-PILI
   const servicesList = [
     { id: 'diag', name: 'Diagnostic Check', desc: 'Full system computer scan and physical inspection.', price: 50.00 },
     { id: 'oil', name: 'Oil Change', desc: 'Includes premium synthetic oil and new filter.', price: 85.00 }
@@ -17,11 +16,9 @@ function Services() {
   
   const timeSlots = ['09:00 AM', '10:30 AM', '01:00 PM', '02:00 PM', '03:30 PM'];
 
-  // 🔥 BAG-O: State para ma-track ang kasamtangang buwan ug tuig nga gitan-aw
   const [currentViewDate, setCurrentViewDate] = useState(new Date());
-
   const [selectedService, setSelectedService] = useState(servicesList[0]);
-  const [selectedDay, setSelectedDay] = useState(new Date().getDate()); // Default to today's date
+  const [selectedDay, setSelectedDay] = useState(new Date().getDate());
   const [selectedTime, setSelectedTime] = useState('02:00 PM');
   const [isBooking, setIsBooking] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
@@ -41,28 +38,24 @@ function Services() {
     fetchUserData();
   }, [currentUser]);
 
-  // 🔥 BAG-O: Dynamic generation sa mga adlaw sa kalendaryo base sa currentViewDate
   const calendarDays = useMemo(() => {
     const year = currentViewDate.getFullYear();
     const month = currentViewDate.getMonth();
 
-    const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 (Sun) to 6 (Sat)
+    const firstDayOfMonth = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const daysInPrevMonth = new Date(year, month, 0).getDate();
 
     const days = [];
 
-    // Mga adlaw sa niaging buwan (para mapuno ang una nga row)
     for (let i = firstDayOfMonth - 1; i >= 0; i--) {
       days.push({ day: daysInPrevMonth - i, currentMonth: false });
     }
 
-    // Mga adlaw sa karon nga buwan
     for (let i = 1; i <= daysInMonth; i++) {
       days.push({ day: i, currentMonth: true });
     }
 
-    // Mga adlaw sa sunod nga buwan (para ma-kumpleto ang last row)
     const totalDaysAdded = days.length;
     const remainingCells = (Math.ceil(totalDaysAdded / 7) * 7) - totalDaysAdded;
     for (let i = 1; i <= remainingCells; i++) {
@@ -72,25 +65,22 @@ function Services() {
     return days;
   }, [currentViewDate]);
 
-  // 🔥 BAG-O: Functions para sa Left ug Right buttons
   const handlePrevMonth = () => {
     setCurrentViewDate(new Date(currentViewDate.getFullYear(), currentViewDate.getMonth() - 1, 1));
-    setSelectedDay(null); // Reset day selection inig ilis og buwan
+    setSelectedDay(null);
   };
 
   const handleNextMonth = () => {
     setCurrentViewDate(new Date(currentViewDate.getFullYear(), currentViewDate.getMonth() + 1, 1));
-    setSelectedDay(null); // Reset day selection inig ilis og buwan
+    setSelectedDay(null);
   };
 
-  // Mga text para sa Display
   const currentMonthYearText = currentViewDate.toLocaleString('default', { month: 'long', year: 'numeric' });
   const currentMonthText = currentViewDate.toLocaleString('default', { month: 'long' });
   const currentYear = currentViewDate.getFullYear();
 
-  // KANI ANG FUNCTION MO-SAVE SA FIREBASE
   const handleConfirmBooking = async () => {
-    if (!currentUser || !selectedDay) return; // Make sure a day is selected
+    if (!currentUser || !selectedDay) return;
     setIsBooking(true);
 
     try {
@@ -100,7 +90,7 @@ function Services() {
         customerEmail: currentUser.email,
         service: selectedService.name,
         price: selectedService.price,
-        date: `${currentMonthText} ${selectedDay}, ${currentYear}`, // 🔥 Updated to use dynamic date
+        date: `${currentMonthText} ${selectedDay}, ${currentYear}`,
         time: selectedTime,
         status: 'Pending',
         mechanic: 'Unassigned',
@@ -112,7 +102,6 @@ function Services() {
       setToastMessage("Booking Confirmed Successfully! 🎉");
       setShowToast(true);
       
-      // I-redirect sa home after 2 seconds
       setTimeout(() => {
         setShowToast(false);
         navigate('/');
@@ -163,7 +152,7 @@ function Services() {
                     )}
                     <h3 className={`font-bold text-lg mb-1 ${selectedService.id === srv.id ? 'text-white' : 'text-slate-300'}`}>{srv.name}</h3>
                     <p className={`text-xs mb-3 ${selectedService.id === srv.id ? 'text-slate-400' : 'text-slate-500'}`}>{srv.desc}</p>
-                    <span className={`font-black text-lg ${selectedService.id === srv.id ? 'text-blue-500' : 'text-slate-300'}`}>${srv.price.toFixed(2)}</span>
+                    <span className={`font-black text-lg ${selectedService.id === srv.id ? 'text-blue-500' : 'text-slate-300'}`}>₱{srv.price.toFixed(2)}</span>
                   </div>
                 ))}
               </div>
@@ -179,11 +168,8 @@ function Services() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div>
                   <div className="flex justify-between items-center mb-4">
-                    {/* 🔥 Gidugang ang onClick=handlePrevMonth */}
                     <button onClick={handlePrevMonth} className="text-slate-400 hover:text-white transition-colors p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
-                    {/* 🔥 Dynamic Month ug Year */}
                     <span className="text-white font-bold">{currentMonthYearText}</span>
-                    {/* 🔥 Gidugang ang onClick=handleNextMonth */}
                     <button onClick={handleNextMonth} className="text-slate-400 hover:text-white transition-colors p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>
                   </div>
                   <div className="grid grid-cols-7 gap-1 text-center mb-2">
@@ -265,7 +251,6 @@ function Services() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400">Date</span>
-                  {/* 🔥 Dynamic summary date */}
                   <span className="font-medium">{selectedDay ? `${currentMonthText} ${selectedDay}, ${currentYear}` : 'Select a day'}</span>
                 </div>
                 <div className="flex justify-between items-center">
@@ -276,7 +261,7 @@ function Services() {
 
               <div className="flex justify-between items-end mb-6">
                 <span className="text-base font-bold text-white">Total Price</span>
-                <span className="text-3xl font-black text-blue-500">${selectedService.price.toFixed(2)}</span>
+                <span className="text-3xl font-black text-blue-500">₱{selectedService.price.toFixed(2)}</span>
               </div>
 
               <button 

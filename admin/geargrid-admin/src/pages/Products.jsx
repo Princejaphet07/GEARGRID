@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, addDoc, updateDoc, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, onSnapshot, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 
 function Products() {
@@ -58,20 +58,25 @@ function Products() {
     setIsUploading(true);
     const uploadData = new FormData();
     uploadData.append("file", file);
-    uploadData.append("upload_preset", "upload"); 
-    uploadData.append("cloud_name", "drabx5lq2"); 
-
+    // FIXED: Changed preset to "geargrid" to match your Cloudinary dashboard!
+    uploadData.append("upload_preset", "geargrid"); 
+    uploadData.append("cloud_name", "djhtu0rzz"); 
     try {
-      const res = await fetch("https://api.cloudinary.com/v1_1/drabx5lq2/image/upload", {
+      const res = await fetch("https://api.cloudinary.com/v1_1/djhtu0rzz/image/upload", {
         method: "POST",
         body: uploadData,
       });
       const data = await res.json();
-      setFormData({ ...formData, image: data.secure_url });
-      showNotification("Image uploaded successfully!");
+      
+      if (data.secure_url) {
+        setFormData({ ...formData, image: data.secure_url });
+        showNotification("Image uploaded successfully!");
+      } else {
+        throw new Error(data.error?.message || "Cloudinary upload failed");
+      }
     } catch (err) {
-      console.error(err);
-      showNotification("Failed to upload image.", "error");
+      console.error("Cloudinary Error:", err);
+      showNotification("Failed to upload image. Check Cloudinary unsigned preset.", "error");
     } finally {
       setIsUploading(false);
     }
@@ -81,12 +86,22 @@ function Products() {
     e.preventDefault();
     setIsSaving(true);
     try {
+      // Prevent saving 'undefined' to Firebase
+      const productData = { ...formData };
+      if (!productData.image) productData.image = "";
+
       if (editId) {
         const productRef = doc(db, "products", editId);
-        await updateDoc(productRef, formData);
+        await updateDoc(productRef, {
+          ...productData,
+          updatedAt: serverTimestamp()
+        });
         showNotification("Product updated successfully!");
       } else {
-        await addDoc(collection(db, "products"), formData);
+        await addDoc(collection(db, "products"), {
+          ...productData,
+          createdAt: serverTimestamp() // Fixes the Home page empty issue!
+        });
         showNotification("Product added successfully!");
       }
       handleCloseForm();
@@ -137,7 +152,7 @@ function Products() {
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentItems = filteredProducts.slice(indexOfFirstItem, indexOfLastItem);
 
-  const categories = ['All', 'Engine', 'Electrical', 'Accessories', 'Transmission', 'Suspension'];
+  const categories = ['All', 'Engine', 'Electrical', 'Accessories', 'Transmission', 'Brake'];
 
   return (
     <div className="min-h-screen bg-[#0f1522] font-sans p-6 lg:p-10 text-slate-300 relative z-0 overflow-hidden">
@@ -217,7 +232,7 @@ function Products() {
                         {product.image ? (
                            <img src={product.image} alt={product.name} className="w-20 h-20 md:w-24 md:h-24 object-cover rounded-xl border border-white/10 shadow-md" />
                         ) : (
-                           <div className="w-20 h-20 md:w-24 md:h-24 bg-white/5 border border-white/10 rounded-xl flex items-center justify-center text-slate-500 text-3xl">📦</div>
+                           <div className="w-20 h-20 md:w-24 md:h-24 bg-white/5 border border-white/10 rounded-xl flex items-center justify-center text-slate-500 text-3xl">🧩</div>
                         )}
                         <div>
                           <p className="font-bold text-white text-base md:text-lg line-clamp-1">{product.name}</p>
@@ -331,7 +346,7 @@ function Products() {
                  {formData.image ? (
                     <img src={formData.image} alt="Preview" className="w-24 h-24 rounded-xl object-cover border border-white/20 shadow-md" />
                  ) : (
-                    <div className="w-24 h-24 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-slate-400 text-3xl">📷</div>
+                    <div className="w-24 h-24 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-slate-400 text-3xl">🖼</div>
                  )}
                  <div className="flex-1">
                     <label className="block text-xs font-bold text-slate-400 mb-2">Product Image</label>
@@ -359,7 +374,8 @@ function Products() {
                     <option value="Electrical">Electrical</option>
                     <option value="Accessories">Accessories</option>
                     <option value="Transmission">Transmission</option>
-                    <option value="Suspension">Suspension</option>
+                    <option value="Brake">Brake</option>
+                    
                   </select>
                 </div>
                 <div>
